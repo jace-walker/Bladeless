@@ -1,90 +1,115 @@
-# Blade face check-in — v5
+# Blade face check-in
 
-A local integration prototype styled after the supplied three screenshots. Includes My profile, Check-in kiosk, Admin, and the paired iPhone attendee page. It does not connect to the real Blade portal, Discord, or a payment provider.
+Face check-in for club events. Members opt in and enroll five shots of their face. At an event, a laptop or phone at the door checks them in when it recognizes them. Organizers manage members, dues, consent, and attendance from an admin page.
 
-## What is new
+- **Hosting:** the Vercel deployment runs a Flask API (`app.py`).
+- **Data:** everything is stored in **Neon Postgres**, and **pgvector** does the face matching inside the database.
+- **Face model:** Facenet512 via DeepFace. Its weights load from the **Hugging Face Hub**.
 
-- Browser enrollment: consent, member selection/addition, five real embedding captures, and face-data deletion.
-- Kiosk: start/stop, computer or paired iPhone camera, strictness slider, optional DeepFace anti-spoofing, hidden preview, event selection, and manual member-ID/QR fallback.
-- Admin: live green/red result, member details, dues toggles, sample past-event counts plus new attendance, opt-in status, recent results, and one-click attendance reset.
-- Recognition now runs inside the Python server. You do not need to run `face_check.py` simultaneously. The same Facenet512/OpenCV pipeline is used.
+## How it fits together
 
-## Prepare your Windows folder
-
-Extract the ZIP. Copy your existing `faces.json` and `attendance.sqlite3` into the new `blade-demo` folder if you want to retain them. Do not copy older server/UI files over the new ones. Existing face samples are read, but each member starts with consent disabled; use the profile checkbox to explicitly opt them in. Existing face names `Stuart` and `Jace` map to those demo members. If your face data uses other names, add the exact name as a member.
-
-The SQLite schema adds tables without dropping old attendance. Stop old servers and trackers before copying the database. No face data or attendance database is bundled in this download.
-
-## Start with your existing face-recognition environment
-
-Open Command Prompt in the extracted v5 `blade-demo` folder. Run:
-
-```bat
-"C:\Users\Owner\Downloads\blade-demo-v2\blade-demo\.venv\Scripts\python.exe" server.py --secure
+```
+Browser pages (public/)          Vercel function (app.py)                 Neon Postgres
+ kiosk / profile / admin   --->   /api/... endpoints                --->   members, events, checkins,
+ attendee phone page              face_engine.py: snapshot -> embedding    face_embeddings (pgvector),
+                                  db.py: all the SQL                       kiosk settings + latest result
 ```
 
-Use your actual installed Python environment path if it differs. `py server.py` can serve member management, but enrollment and recognition require DeepFace, NumPy, and OpenCV installed in the Python interpreter running the server. You previously installed these in the v2 environment.
+- **Photos are never stored.** A camera snapshot is turned into a 512-number embedding in memory, then thrown away.
+- **Matching happens in the database.** One query with pgvector's `<=>` (cosine distance) operator finds the closest consenting member. A distance under the strictness setting (default 0.30) checks them in.
+- **Consent comes first.** Consent is required before capture. Withdrawing consent takes a member out of matching right away, and *Delete face data* removes their embeddings while keeping attendance history.
 
-If creating a fresh environment:
+| File | What it does |
+| --- | --- |
+| `app.py` | The web API that runs on Vercel (Flask). Same endpoints as the old local `server.py` |
+| `db.py` | All database queries: members, dues, consent, events, check-ins, kiosk settings |
+| `face_engine.py` | Snapshot → embedding with DeepFace. Downloads the model weights from Hugging Face |
+| `schema.sql` | Creates and upgrades the Neon tables. Safe to run again |
+| `seed.sql` | Demo events and members from the local demo |
+| `public/` | The web pages, which Vercel serves directly: `index.html` (profile, kiosk, admin), `guest.html` (attendee phone), `pair.html` |
+| `face_check.py` | Terminal tool: enroll and check in with a webcam, using the same Neon database |
+| `tools/import_local_data.py` | Copies `faces.json` and `attendance.sqlite3` from the old local demo into Neon |
+| `tests/test_api.py` | API tests |
+| `server.py`, `demo_service.py`, `vision_service.py`, `checkin_bridge.py`, `phone_camera.py` | The old local-only demo, documented in [docs/local-demo.md](docs/local-demo.md). Can be removed once the Vercel version is confirmed working |
 
-```bat
-py -m venv .venv
-.venv\Scripts\python.exe -m pip install deepface opencv-contrib-python
-.venv\Scripts\python.exe server.py --secure
+## Deploying on Vercel
+
+1. **Set up the database (once).** From a laptop with this repo and a `.env` containing your Neon `DATABASE_URL`, run:
+   ```bash
+   python face_check.py setup   # creates or upgrades the tables
+   python face_check.py seed    # optional: demo events and members
+   ```
+2. **Bring over existing face data (optional).** On the computer that ran the old local demo, run:
+   ```bash
+   python tools/import_local_data.py --faces faces.json --sqlite attendance.sqlite3
+   ```
+3. **Add environment variables.** In the Vercel project, go to **Settings → Environment Variables** and add:
+
+   | Name | Value |
+   | --- | --- |
+   | `DATABASE_URL` | Neon's **pooled** connection string (in Neon's **Connect** dialog, turn **Connection pooling** on) |
+   | `ADMIN_KEY` | A long random key for the organizer's computer |
+   | `PHONE_KEY` | A different key for the attendee phone |
+
+   To make a key, run `python -c "import secrets; print(secrets.token_urlsafe(16))"`. Never commit these values.
+4. **Check the framework setting.** Under **Settings → Build and Deployment**, the framework preset should be **Flask**. Pick it if Vercel didn't detect it. `pyproject.toml` tells Vercel the app is `app:app`.
+5. **Redeploy.** Push to `main`, or use **Deployments → ⋯ → Redeploy**. Environment variable changes only apply after a redeploy.
+6. **Check the deployment.** Open `https://<your-project>.vercel.app/api/health`. It should show `"ok": true` and `"adminKeySet": true`.
+7. **Pair your devices.** Open `/pair.html` and enter `ADMIN_KEY` on the organizer's computer, or `PHONE_KEY` on the attendee phone.
+
+**Size and speed:** the deployment is about 450 MB, under Vercel's 500 MB limit for Python. If a future change pushes it over, add the environment variable `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. After a quiet period, the first request takes about 10 seconds while the face model loads; after that, each check takes about 0.2 seconds.
+
+## The pages (`public/`)
+
+The pages come from the local demo, and they call the same endpoints as before. What changed when they moved to Vercel:
+
+- **Frames are checked right away.** The computer kiosk and the attendee phone send a frame to `POST /api/camera` about once a second (JPEG, at most 1024 px on each side and 250 KB). The server checks each one immediately and returns the result. The admin page and `/api/display` show the latest result.
+- **No phone preview or phone enrollment.** The old server relayed the phone's camera to the organizer's computer. Vercel can't hold frames between requests, so `GET /api/camera/frame` always returns 204. Enroll with the computer's camera. Phone check-in at the kiosk still works.
+- **Pairing.** Pages load without a key, and any API call that returns 403 sends you to `/pair.html`.
+- **Accurate wording.** Text about the local server and Cloudflare tunnel was updated, including the consent text, so it describes where frames now go.
+- **IDs are strings.** Member ids are numbers sent as strings (`"3"`), and events use their short id (`"intro-ai"`). Manual check-in also accepts a member code (`KH-0001`) or QR text `member:<id or code>`.
+
+## Running locally
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+flask --app app run --debug        # http://127.0.0.1:5000, serves public/ too
 ```
 
-The server prints separate admin and phone pairing keys. They change after every server restart. Open http://127.0.0.1:8000/pair.html on your computer, enter the admin key, and keep it private. The server binds to loopback by default. Do not expose an unprotected server through a public tunnel.
+Locally, if `ADMIN_KEY` isn't set, everything is open (like `python server.py` without `--secure`). On Vercel, `ADMIN_KEY` is required.
 
-## My profile
+The terminal tool also works with the same database. See the comment at the top of `face_check.py`. It needs the OpenCV build that can open windows (see the note in `requirements.txt`).
 
-Open My profile. The profile selector is a demo identity selector for the organizer, not production member authentication. Select the correct person or add their name, obtain their consent, and tick the checkbox. This enables capture. For a computer camera, allow browser camera access. Capture five shots with small angle changes. First capture may take a while as the model loads/downloads. A failed/no-face capture does not increment the counter.
+## Tests
 
-To enroll from the iPhone, select Paired iPhone, start its camera on its paired HTTPS attendee page, then Capture on the COMPUTER. The profile preview shows its current image. The phone key still cannot browse profiles or member details. Avoid another person's face entering the frame during enrollment.
+The tests **erase every table** in the database they use, so point them at a separate test database, such as a Neon branch made for testing:
 
-Only embeddings are saved in `faces.json`; captured photos are processed in memory. If you already have five samples under the member’s exact enrolled name, giving consent makes those samples eligible without recapture. Unticking consent disables face recognition while retaining embeddings until you click Delete face data. Deletion also revokes consent, but preserves attendance/history. Manual member-ID check-in remains available.
-
-## Check-in kiosk
-
-Select an event and a camera source, then Start kiosk. For This computer, your browser supplies the video. For Paired iPhone, the attendee browser supplies it and you do not need the old tracker process. Only people with explicit consent and at least five embeddings are candidates.
-
-Match strictness is the maximum cosine distance (0.10–0.60): lower is stricter. Start at the default 0.30. Changes affect subsequent checks. Require liveness passes `anti_spoofing=True` to DeepFace. It may need additional model downloads/dependencies and is not a guarantee against impersonation. If your installed DeepFace lacks support or the model cannot load, a model error is shown; the app does not silently bypass this option. No new attendance is awarded for a liveness failure.
-
-Hide camera preview only hides the organizer preview; it does not stop capture or matching. Stop kiosk pauses recognition. Phone streaming can be stopped separately on the phone.
-
-The manual fallback accepts the displayed KH member code or the internal member ID. QR scanning works only when the browser provides the native BarcodeDetector QR format; otherwise the typed input remains available. Demo QR contents must be the member ID, KH code, or `member:ID`. Real Blade account QR payloads are not interchangeable with these demo member codes.
-
-## iPhone camera and attendee result
-
-Safari camera access on a phone requires HTTPS. Start the protected server first. In a separate terminal, use the existing Cloudflare executable:
-
-```bat
-"C:\Users\Owner\Downloads\cloudflared.exe" tunnel --url http://127.0.0.1:8000
+```bash
+pip install pytest
+TEST_DATABASE_URL=postgresql://...test database... python -m pytest tests -q
 ```
 
-Open the new exact HTTPS `.trycloudflare.com` URL on the iPhone, pair with the PHONE key, then tap Start iPhone camera and allow access. Keep Safari visible and the phone unlocked. On the COMPUTER kiosk page select Paired iPhone and Start kiosk. Do not run `face_check.py` as well.
+The face model is replaced with a stand-in, so the tests take a few seconds and need no camera.
 
-Camera JPEGs pass through Cloudflare to your computer. No microphone is requested. The app keeps only the most recent frame in RAM and does not persist it; stale frames are not supplied to recognition. Embeddings remain local in `faces.json`. Get consent for this processing and relay before starting camera capture. Phone/admin access separation is enforced by the pairing keys: the phone cannot browse member data, retrieve frames, or record attendance.
+## API
 
-The phone shows green for a successful or duplicate check-in, red for unknown/ineligible/liveness/model-error results, and neutral when no face is visible. It does not show names or dues details. The admin sees details and a rejection reason. Stop the tunnel and server with Ctrl+C when finished.
+All endpoints return JSON. Every endpoint except `/api/pair` and `/api/health` needs a paired device. The phone key can only use `/api/display` and `/api/camera`.
 
-## Admin
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/health` | Deployment check (database reachable, admin key set) |
+| `POST /api/pair` `{key}` | Pair this browser (sets a cookie) |
+| `GET /api/state` | Members, events, attendance, recent results, settings, latest match |
+| `GET /api/display` | Latest result status for the attendee screen |
+| `POST /api/camera` | A JPEG frame. Recognizes it if the kiosk is running |
+| `POST /api/settings` | `{eventId, threshold, requireLiveness, running}` (any subset) |
+| `POST /api/members/add` `{name}` | Add a member |
+| `POST /api/members/consent` `{memberId, consent}` | Give or withdraw consent |
+| `POST /api/members/dues` `{memberId, paid}` | Toggle dues |
+| `POST /api/enroll` `{memberId, image}` | Base64 JPEG. Stores one embedding |
+| `POST /api/faces/delete` `{memberId}` | Delete face data and withdraw consent |
+| `POST /api/checkins` `{memberId, eventId}` | Manual or QR check-in |
+| `POST /api/reset` `{confirm: true}` | Clear new attendance and recent results |
 
-Click a Paid/Unpaid button to toggle that demo member’s dues. This is a local test flag, not an actual payment. The AI event is public; the GitHub event is dues-only in this demo. These are sample policies, not claims about the real events.
-
-Initial past-event counts are sample data. Real new attendance is stored locally and counted once per member/event. Duplicate matches do not award more points. Recent results are bounded and repeated identical detections are limited to one log entry per ten seconds.
-
-Reset attendance clears newly recorded attendance and recent results, and stops recognition to avoid immediately recreating attendance. It preserves members, dues settings, and face embeddings. Initial sample past-event counts remain.
-
-## Hosted UI preview
-
-The published Site shows the three views, sample members, and camera controls. It is a STATIC UI preview. Member writes, enrollment, QR/ID check-in, and real recognition require your local Python server; the preview explicitly marks these unavailable rather than pretending to recognize faces.
-
-## Storage and scope
-
-`attendance.sqlite3`: members, consent flags, settings, attendance, bounded check-in log. `faces.json`: only embeddings keyed by enrollment name. Camera frames stay in memory. Copy these files intentionally when changing folders; never commit them to GitHub.
-
-This is a single-station development demo. Multiple simultaneous stations/users, production identity verification, formal biometric retention controls, and real Blade authentication are outside this version. A lower threshold and optional anti-spoofing do not turn the prototype into a guaranteed identity check.
-
-## Verification
-
-Run `python -m unittest discover -s tests -q`. Backend tests cover persistence, consent, enrollment/deletion, late capture after deletion, concurrent duplicate prevention, dues checks, reset preservation, mocked-embedding matching, and phone/admin permission boundaries. The embedding tests deliberately mock model output; they do not validate real facial accuracy. JavaScript syntax was checked. Live DeepFace inference and iPhone Safari camera behavior must be tested on your installed environment; DeepFace/OpenCV are not installed in the build environment. No browser visual QA was available.
+Possible check-in results: `checked_in`, `already_checked_in`, `dues_required`, `not_enrolled`, `member_not_found`, `unknown`, `liveness_failed`, `camera_error`, `idle`.
