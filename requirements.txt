@@ -1,0 +1,7 @@
+deepface==0.0.102
+psycopg[binary]==3.3.6
+pgvector==0.5.1
+python-dotenv==1.2.4
+# After installing these, swap OpenCV for the build that can open windows (see README):
+#   pip uninstall -y opencv-contrib-python-headless
+#   pip install opencv-contrib-python==5.0.0.93
