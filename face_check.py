@@ -9,7 +9,8 @@ Setup (once):
     Create a .env file next to this script containing:
         DATABASE_URL=postgresql://...your Neon connection string...
         CAMERA_INDEX=0          (use the number camera_test.py showed for your MacBook)
-    python face_check.py setup  # creates the tables in Neon (safe to run again)
+    python face_check.py setup  # creates or upgrades the tables in Neon (safe to run again)
+    python face_check.py seed   # optional: adds the demo events and members from seed.sql
 
 Usage:
     python face_check.py enroll "Jace"              # capture 5 shots of one person
@@ -45,6 +46,7 @@ SHOTS_PER_PERSON = 5
 SECONDS_BETWEEN_CHECKS = 0.5   # recognition is slow-ish, so don't run it every frame
 MATCHES_TO_CHECK_IN = 2        # same person must match this many checks in a row (~1 second)
 SCHEMA_FILE = Path(__file__).with_name("schema.sql")
+SEED_FILE = Path(__file__).with_name("seed.sql")
 WINDOW = "Face check-in (Q to quit)"
 
 GREEN = (80, 200, 80)
@@ -100,8 +102,9 @@ def save_member(name, embeddings):
     def work(conn):
         with conn.transaction():  # if anything fails, nothing is saved
             member_id = conn.execute(
-                """INSERT INTO members (name) VALUES (%s)
-                   ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                """INSERT INTO members (name, consented_at) VALUES (%s, now())
+                   ON CONFLICT (name) DO UPDATE
+                   SET consented_at = COALESCE(members.consented_at, now())
                    RETURNING id""",
                 (name,),
             ).fetchone()[0]
@@ -119,6 +122,7 @@ def best_match(embedding):
     return query(
         """SELECT m.id, m.name, f.embedding <=> %s AS distance
            FROM face_embeddings f JOIN members m ON m.id = f.member_id
+           WHERE m.consented_at IS NOT NULL   -- skip anyone who withdrew consent in the web app
            ORDER BY distance
            LIMIT 1""",
         (embedding,),
@@ -206,7 +210,13 @@ def draw_box(img, box, color):
 def setup():
     with psycopg.connect(database_url(), autocommit=True) as conn:
         conn.execute(SCHEMA_FILE.read_text())
-    print("Database is ready: members, face_embeddings, events and checkins tables exist.")
+    print("Database is ready: all tables exist and are up to date.")
+
+
+def seed():
+    with psycopg.connect(database_url(), autocommit=True) as conn:
+        conn.execute(SEED_FILE.read_text())
+    print("Added the demo events and members (anything already there was kept).")
 
 
 def enroll(name):
@@ -374,6 +384,8 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args == ["setup"]:
         setup()
+    elif args == ["seed"]:
+        seed()
     elif args[:1] == ["enroll"] and len(args) == 2:
         enroll(args[1])
     elif args[:1] == ["event"] and len(args) == 2:
