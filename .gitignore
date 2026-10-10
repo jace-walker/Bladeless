@@ -1,5 +1,7 @@
-.env
-.venv/
 __pycache__/
+*.py[cod]
+.venv/
+attendance.sqlite3
+attendance.sqlite3-*
 faces.json
-.DS_Store
+faces.json.tmp
