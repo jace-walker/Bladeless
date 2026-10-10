@@ -7,3 +7,4 @@ faces.json
 faces.json.tmp
 .env
 .DS_Store
+.pytest_cache/
