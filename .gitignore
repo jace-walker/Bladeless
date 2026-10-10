@@ -5,3 +5,5 @@ attendance.sqlite3
 attendance.sqlite3-*
 faces.json
 faces.json.tmp
+.env
+.DS_Store
