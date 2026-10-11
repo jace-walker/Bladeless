@@ -1,6 +1,6 @@
 """Everything the web app stores lives in Neon. This module holds all of the SQL.
 
-It replaces demo_service.py (SQLite + faces.json), which kept data on one laptop.
+It replaces the original local demo's storage (SQLite + faces.json on one laptop).
 Every function takes an open connection, so app.py can use one connection per request.
 
 IDs: the database uses integer ids, but the API always sends ids as strings

@@ -1,4 +1,4 @@
--- Demo data carried over from the local Blade demo (demo_service.py and server.py).
+-- Demo events and made-up members for trying the app.
 -- Safe to run more than once. Existing members keep their face data and settings;
 -- only a missing member code is filled in.
 -- Run it with:  python face_check.py seed
@@ -9,10 +9,10 @@ INSERT INTO events (slug, name, held_on, date_label, location, points, audience)
 ON CONFLICT (slug) DO NOTHING;
 
 INSERT INTO members (name, display_id, paid, base_events) VALUES
-  ('Stuart Palmer', 'KH-0003', true, 6),
-  ('Jace', 'KH-0001', true, 3),
-  ('Aaron', 'KH-0002', false, 1),
-  ('Jack', 'KH-6659', false, 7)
+  ('Alex Rivera', 'KH-0003', true, 6),
+  ('Sam Chen', 'KH-0001', true, 3),
+  ('Jordan Lee', 'KH-0002', false, 1),
+  ('Taylor Kim', 'KH-6659', false, 7)
 ON CONFLICT (name) DO UPDATE
   SET display_id = COALESCE(members.display_id, EXCLUDED.display_id);
 

@@ -126,9 +126,9 @@ def test_cross_origin_post_rejected(admin):
 def test_seeded_state(admin):
     data = admin.get("/api/state").get_json()
     assert {e["id"] for e in data["events"]} == {"intro-ai", "intro-github"}
-    assert {m["name"] for m in data["members"]} == {"Stuart Palmer", "Jace", "Aaron", "Jack"}
+    assert {m["name"] for m in data["members"]} == {"Alex Rivera", "Sam Chen", "Jordan Lee", "Taylor Kim"}
     assert data["settings"] == {"eventId": "intro-ai", "threshold": 0.3, "requireLiveness": False, "running": False}
-    assert member(admin, "Jack")["eventsAttended"] == 7
+    assert member(admin, "Taylor Kim")["eventsAttended"] == 7
 
 
 def test_members_consent_and_enrollment(admin):
@@ -148,33 +148,33 @@ def test_members_consent_and_enrollment(admin):
 
 
 def test_face_checkin_flow(admin, phone):
-    enroll(admin, "Jace")
-    assert frame(admin, "Jace#x")["status"] == "idle"  # kiosk not running yet
+    enroll(admin, "Sam Chen")
+    assert frame(admin, "Sam Chen#x")["status"] == "idle"  # kiosk not running yet
 
     start(admin)
-    result = frame(phone, "Jace#live")
+    result = frame(phone, "Sam Chen#live")
     assert result["status"] == "checked_in" and result["pointsAwarded"] == 10
-    assert result["member"]["name"] == "Jace"
+    assert result["member"]["name"] == "Sam Chen"
     assert phone.get("/api/display").get_json() == {"status": "checked_in"}  # no name for attendees
-    assert admin.get("/api/state").get_json()["latestMatch"]["member"]["name"] == "Jace"
+    assert admin.get("/api/state").get_json()["latestMatch"]["member"]["name"] == "Sam Chen"
 
-    assert frame(phone, "Jace#again")["status"] == "already_checked_in"
+    assert frame(phone, "Sam Chen#again")["status"] == "already_checked_in"
     assert frame(phone, "Stranger")["status"] == "unknown"
     assert frame(phone, "noface")["status"] == "idle"
 
     state = admin.get("/api/state").get_json()
     assert len(state["attendance"]) == 1 and state["attendance"][0]["event_id"] == "intro-ai"
-    assert member(admin, "Jace")["eventsAttended"] == 4
+    assert member(admin, "Sam Chen")["eventsAttended"] == 4
     assert {r["status"] for r in state["recent"]} >= {"checked_in", "already_checked_in", "unknown"}
 
 
 def test_dues_only_event(admin):
-    enroll(admin, "Aaron")
+    enroll(admin, "Jordan Lee")
     start(admin, "intro-github")
-    assert frame(admin, "Aaron#1")["status"] == "dues_required"
-    aaron = member(admin, "Aaron")
-    admin.post("/api/members/dues", json={"memberId": aaron["id"], "paid": True})
-    assert frame(admin, "Aaron#2")["status"] == "checked_in"
+    assert frame(admin, "Jordan Lee#1")["status"] == "dues_required"
+    jordan = member(admin, "Jordan Lee")
+    admin.post("/api/members/dues", json={"memberId": jordan["id"], "paid": True})
+    assert frame(admin, "Jordan Lee#2")["status"] == "checked_in"
 
 
 def test_liveness(admin):
@@ -185,20 +185,20 @@ def test_liveness(admin):
 def test_manual_checkin_by_code_and_qr(admin):
     r = admin.post("/api/checkins", json={"memberId": "KH-0002", "eventId": "intro-ai"}).get_json()
     assert r["status"] == "checked_in" and r["method"] == "manual"
-    jack = member(admin, "Jack")
-    assert admin.post("/api/checkins", json={"memberId": f"member:{jack['id']}", "eventId": "intro-ai"}).get_json()["status"] == "checked_in"
+    taylor = member(admin, "Taylor Kim")
+    assert admin.post("/api/checkins", json={"memberId": f"member:{taylor['id']}", "eventId": "intro-ai"}).get_json()["status"] == "checked_in"
     assert admin.post("/api/checkins", json={"memberId": "KH-NOPE", "eventId": "intro-ai"}).get_json()["status"] == "member_not_found"
     assert admin.post("/api/checkins", json={"memberId": "KH-0002", "eventId": "nope"}).status_code == 400
 
 
 def test_revoked_consent_and_deletion(admin):
-    jace = enroll(admin, "Jace")
+    sam = enroll(admin, "Sam Chen")
     start(admin)
-    admin.post("/api/members/consent", json={"memberId": jace["id"], "consent": False})
-    assert frame(admin, "Jace#1")["status"] == "unknown"  # not a candidate without consent
-    admin.post("/api/faces/delete", json={"memberId": jace["id"]})
-    jace = member(admin, "Jace")
-    assert jace["samples"] == 0 and not jace["consent"]
+    admin.post("/api/members/consent", json={"memberId": sam["id"], "consent": False})
+    assert frame(admin, "Sam Chen#1")["status"] == "unknown"  # not a candidate without consent
+    admin.post("/api/faces/delete", json={"memberId": sam["id"]})
+    sam = member(admin, "Sam Chen")
+    assert sam["samples"] == 0 and not sam["consent"]
 
 
 def test_settings_validation(admin):
@@ -209,18 +209,18 @@ def test_settings_validation(admin):
 
 
 def test_reset_keeps_members(admin):
-    enroll(admin, "Jace")
+    enroll(admin, "Sam Chen")
     start(admin)
-    frame(admin, "Jace#1")
+    frame(admin, "Sam Chen#1")
     assert admin.post("/api/reset", json={"confirm": False}).status_code == 400
     assert admin.post("/api/reset", json={"confirm": True}).get_json() == {"status": "reset"}
     state = admin.get("/api/state").get_json()
     assert state["attendance"] == [] and state["recent"] == [] and not state["settings"]["running"]
-    assert member(admin, "Jace")["samples"] == 5 and member(admin, "Jace")["eventsAttended"] == 3
+    assert member(admin, "Sam Chen")["samples"] == 5 and member(admin, "Sam Chen")["eventsAttended"] == 3
 
 
 def test_frames_are_throttled(app_module, admin, monkeypatch):
-    enroll(admin, "Jace")
+    enroll(admin, "Sam Chen")
     start(admin)
     monkeypatch.setattr(app_module, "FRAME_INTERVAL_SECONDS", 5)
     first = admin.post("/api/camera", data=jpeg("Stranger"), content_type="image/jpeg").get_json()
