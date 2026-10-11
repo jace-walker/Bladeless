@@ -1,6 +1,6 @@
 """Blade face check-in API, deployed on Vercel as a Flask app (entrypoint: app:app).
 
-Replaces server.py for hosting. Same endpoints and responses as the local demo,
+Replaces the original local-only demo server. Same endpoints and responses,
 with three differences, because a Vercel function can't keep anything in memory
 between requests:
   * All data lives in Neon (see db.py), not in attendance.sqlite3 and faces.json.
@@ -89,7 +89,7 @@ def role():
     """'admin', 'phone' or None for this request."""
     admin_key, phone_key = keys()
     if not admin_key:
-        # No key configured: allowed only for local testing, like `python server.py` without --secure.
+        # No key configured: allowed only for local testing, like the original local demo.
         return None if ON_VERCEL else "admin"
     supplied = request.headers.get("Authorization", "").removeprefix("Bearer ") or request.cookies.get("blade_key", "")
     if supplied and secrets.compare_digest(supplied, admin_key):

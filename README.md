@@ -21,16 +21,15 @@ Browser pages (public/)          Vercel function (app.py)                 Neon P
 
 | File | What it does |
 | --- | --- |
-| `app.py` | The web API that runs on Vercel (Flask). Same endpoints as the old local `server.py` |
+| `app.py` | The web API that runs on Vercel (Flask) |
 | `db.py` | All database queries: members, dues, consent, events, check-ins, kiosk settings |
 | `face_engine.py` | Snapshot → embedding with DeepFace. Downloads the model weights from Hugging Face |
 | `schema.sql` | Creates and upgrades the Neon tables. Safe to run again |
-| `seed.sql` | Demo events and members from the local demo |
+| `seed.sql` | Demo events and made-up members for trying the app |
 | `public/` | The web pages, which Vercel serves directly: `index.html` (profile, kiosk, admin), `guest.html` (attendee phone), `pair.html` |
 | `face_check.py` | Terminal tool: enroll and check in with a webcam, using the same Neon database |
-| `tools/import_local_data.py` | Copies `faces.json` and `attendance.sqlite3` from the old local demo into Neon |
+| `tools/import_local_data.py` | Copies `faces.json` and `attendance.sqlite3` from the original local demo into Neon |
 | `tests/test_api.py` | API tests |
-| `server.py`, `demo_service.py`, `vision_service.py`, `checkin_bridge.py`, `phone_camera.py` | The old local-only demo, documented in [docs/local-demo.md](docs/local-demo.md). Can be removed once the Vercel version is confirmed working |
 
 ## Deploying on Vercel
 
@@ -77,7 +76,7 @@ pip install -r requirements.txt
 flask --app app run --debug        # http://127.0.0.1:5000, serves public/ too
 ```
 
-Locally, if `ADMIN_KEY` isn't set, everything is open (like `python server.py` without `--secure`). On Vercel, `ADMIN_KEY` is required.
+Locally, if `ADMIN_KEY` isn't set, everything is open (handy for local testing). On Vercel, `ADMIN_KEY` is required.
 
 The terminal tool also works with the same database. See the comment at the top of `face_check.py`. It needs the OpenCV build that can open windows (see the note in `requirements.txt`).
 
