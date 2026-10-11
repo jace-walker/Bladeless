@@ -4,10 +4,10 @@ const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 let preview = false, initialized = false, refreshing = false, captureBusy = false;
 let state = {members:[],events:[],attendance:[],recent:[],settings:{threshold:.3,eventId:'intro-ai',running:false,requireLiveness:false},latestMatch:{status:'idle'},vision:{status:'Not loaded'}};
 const demoMembers = [
- {id:'stuart',name:'Stuart Palmer',displayId:'KH-0003',paid:true,consent:false,samples:0,enrolled:false,eventsAttended:6},
- {id:'jace',name:'Jace',displayId:'KH-0001',paid:true,consent:false,samples:0,enrolled:false,eventsAttended:3},
- {id:'aaron',name:'Aaron',displayId:'KH-0002',paid:false,consent:false,samples:0,enrolled:false,eventsAttended:1},
- {id:'jack',name:'Jack',displayId:'KH-6659',paid:false,consent:false,samples:0,enrolled:false,eventsAttended:7}
+ {id:'stuart',name:'Alex Rivera',displayId:'KH-0003',paid:true,consent:false,samples:0,enrolled:false,eventsAttended:6},
+ {id:'jace',name:'Sam Chen',displayId:'KH-0001',paid:true,consent:false,samples:0,enrolled:false,eventsAttended:3},
+ {id:'aaron',name:'Jordan Lee',displayId:'KH-0002',paid:false,consent:false,samples:0,enrolled:false,eventsAttended:1},
+ {id:'jack',name:'Taylor Kim',displayId:'KH-6659',paid:false,consent:false,samples:0,enrolled:false,eventsAttended:7}
 ];
 const labels = {idle:'Waiting for a face',checked_in:'Checked in',already_checked_in:'Already checked in',unknown:'Not recognized',dues_required:'Dues required',role_required:'Not eligible',not_enrolled:'Face check-in not enabled',member_not_found:'Member not found',liveness_failed:'Liveness check failed',camera_error:'Camera / model error'};
 const camera = {profile:null,kiosk:null};
