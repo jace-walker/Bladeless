@@ -43,6 +43,7 @@ PHONE_PATHS = {"/api/display", "/api/camera"}  # all a paired phone may use
 JSON_POSTS = {
     "/api/checkins", "/api/recognition", "/api/members/add", "/api/members/consent",
     "/api/members/dues", "/api/faces/delete", "/api/enroll", "/api/settings", "/api/reset",
+    "/api/members/remove", "/api/events/add", "/api/events/delete",
 }
 
 app = Flask(__name__, static_folder=None)  # Vercel serves public/ itself
@@ -273,6 +274,13 @@ def json_actions(action):
             result = db.reset_attendance(c)
         elif path == "/api/enroll":
             result = enroll(c, payload)
+        elif path == "/api/members/remove":
+            result = db.remove_member(c, payload.get("memberId"))
+            db.publish(c, dict(status="idle"))  # don't keep showing someone who was removed
+        elif path == "/api/events/add":
+            result = db.add_event(c, payload)
+        elif path == "/api/events/delete":
+            result = db.delete_event(c, payload.get("eventId"))
         else:  # /api/checkins: manual or QR check-in
             if set(payload) != {"memberId", "eventId"}:
                 raise db.ApiError("Expected memberId and eventId")

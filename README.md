@@ -26,7 +26,7 @@ Browser pages (public/)          Vercel function (app.py)                 Neon P
 | `face_engine.py` | Snapshot → embedding with DeepFace. Downloads the model weights from Hugging Face |
 | `schema.sql` | Creates and upgrades the Neon tables. Safe to run again |
 | `seed.sql` | Demo events and made-up members for trying the app |
-| `public/` | The web pages, which Vercel serves directly: `index.html` (profile, kiosk, admin), `guest.html` (attendee phone), `pair.html` |
+| `public/` | The web pages, which Vercel serves directly: `index.html` (enroll, kiosk, admin), `guest.html` (attendee phone), `pair.html` |
 | `face_check.py` | Terminal tool: enroll and check in with a webcam, using the same Neon database |
 | `tools/import_local_data.py` | Copies `faces.json` and `attendance.sqlite3` from the original local demo into Neon |
 | `tests/test_api.py` | API tests |
@@ -58,9 +58,26 @@ Browser pages (public/)          Vercel function (app.py)                 Neon P
 
 **Size and speed:** the deployment is about 450 MB, under Vercel's 500 MB limit for Python. If a future change pushes it over, add the environment variable `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. After a quiet period, the first request takes about 10 seconds while the face model loads; after that, each check takes about 0.2 seconds.
 
+### Testing previews against a copy of the database
+
+Every branch you push gets its own Vercel preview. To keep previews from touching real attendance, give them a [Neon branch](https://neon.com/docs/introduction/branching) — a copy of the database:
+
+1. In the Neon console, open **Branches → Create branch**. Name it `preview` and create it from `main`. It starts as a copy of your current data.
+2. Open the `preview` branch, click **Connect**, turn **Connection pooling** on, and copy the connection string.
+3. In Vercel, go to **Settings → Environment Variables**. Edit the existing `DATABASE_URL` so it applies to **Production** only. Then add a second `DATABASE_URL` with the `preview` branch's string, for **Preview** only.
+4. Redeploy the preview. Production keeps using `main`, and previews use the copy.
+
+To refresh the copy with current data later, open the `preview` branch in Neon and choose **Reset from parent**. If a change edits `schema.sql`, run it on the `preview` branch first to try the upgrade safely.
+
 ## The pages (`public/`)
 
-The pages come from the local demo, and they call the same endpoints as before. What changed when they moved to Vercel:
+`index.html` has three tabs:
+
+- **Enroll:** a guided flow for organizers. Choose a member (or add a new one), have them agree to the consent text, then take five photos with a prompt for each angle.
+- **Check-in kiosk:** the door camera, match strictness, liveness, the current event, and manual or QR check-in.
+- **Admin:** live results, members (dues, face data, remove), events (create, delete before anyone checks in), recent check-ins, and reset.
+
+The pages started as the local demo's and call the same endpoints. What changed when they moved to Vercel:
 
 - **Frames are checked right away.** The computer kiosk and the attendee phone send a frame to `POST /api/camera` about once a second (JPEG, at most 1024 px on each side and 250 KB). The server checks each one immediately and returns the result. The admin page and `/api/display` show the latest result.
 - **No phone preview or phone enrollment.** The old server relayed the phone's camera to the organizer's computer. Vercel can't hold frames between requests, so `GET /api/camera/frame` always returns 204. Enroll with the computer's camera. Phone check-in at the kiosk still works.
@@ -110,5 +127,8 @@ All endpoints return JSON. Every endpoint except `/api/pair` and `/api/health` n
 | `POST /api/faces/delete` `{memberId}` | Delete face data and withdraw consent |
 | `POST /api/checkins` `{memberId, eventId}` | Manual or QR check-in |
 | `POST /api/reset` `{confirm: true}` | Clear new attendance and recent results |
+| `POST /api/members/remove` `{memberId}` | Remove a member, along with their face data and attendance |
+| `POST /api/events/add` `{name, date, time?, location?, points?, duesOnly?}` | Create an event (`date` as `YYYY-MM-DD`, `time` as `HH:MM`) |
+| `POST /api/events/delete` `{eventId}` | Delete an event nobody has checked in to |
 
 Possible check-in results: `checked_in`, `already_checked_in`, `dues_required`, `not_enrolled`, `member_not_found`, `unknown`, `liveness_failed`, `camera_error`, `idle`.

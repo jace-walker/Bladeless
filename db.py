@@ -8,8 +8,10 @@ IDs: the database uses integer ids, but the API always sends ids as strings
 original pages expect.
 """
 
+import datetime as dt
 import json
 import os
+import re
 import uuid
 from contextlib import contextmanager
 
@@ -57,12 +59,23 @@ def _event_dict(row):
     return dict(
         id=_event_id(row),
         name=row["name"],
-        date=row["date_label"] or row["held_on"].strftime("%b %d, %Y"),
+        date=row["date_label"] or _date_label(row["held_on"], None),
+        heldOn=row["held_on"].isoformat(),
         location=row["location"] or "",
         points=row["points"],
         audience=row["audience"],
+        checkins=row.get("checkins", 0),
         roleIds=[],
     )
+
+
+def _date_label(day, start):
+    """'Oct 27, 2026' or 'Oct 27, 2026, 6:30 PM' (same style as the seeded events)."""
+    label = f"{day:%b} {day.day}, {day.year}"
+    if start:
+        hour = start.hour % 12 or 12
+        label += f", {hour}:{start.minute:02d} {'AM' if start.hour < 12 else 'PM'}"
+    return label
 
 
 def _rows(cur):
@@ -76,8 +89,77 @@ def _row(cur):
 
 
 def list_events(conn):
-    cur = conn.execute(f"SELECT {EVENT_COLUMNS} FROM events ORDER BY held_on, id")
+    cur = conn.execute(
+        f"""SELECT {EVENT_COLUMNS},
+                   (SELECT count(*) FROM checkins c WHERE c.event_id = events.id) AS checkins
+            FROM events ORDER BY held_on, id"""
+    )
     return [_event_dict(r) for r in _rows(cur)]
+
+
+EVENT_FIELDS = {"name", "date", "time", "location", "points", "duesOnly"}
+
+
+def _slugify(name):
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40].strip("-") or "event"
+    return "event-" + slug if slug.isdigit() else slug  # never confusable with a numeric id
+
+
+def add_event(conn, payload):
+    """Create an event from the admin form. Returns the new event."""
+    if set(payload) - EVENT_FIELDS:
+        raise ApiError("Unknown event field")
+    name = payload.get("name")
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
+        raise ApiError("Enter an event name of 1–100 characters")
+    name = name.strip()
+    try:
+        day = dt.date.fromisoformat(payload.get("date") or "")
+    except (TypeError, ValueError):
+        raise ApiError("Choose a date for the event")
+    start = None
+    if payload.get("time"):
+        try:
+            start = dt.time.fromisoformat(payload["time"])
+        except (TypeError, ValueError):
+            raise ApiError("Enter the start time as hours and minutes, like 17:30")
+    location = payload.get("location") or ""
+    if not isinstance(location, str) or len(location.strip()) > 80:
+        raise ApiError("Keep the location under 80 characters")
+    points = payload.get("points", 10)
+    if isinstance(points, bool) or not isinstance(points, int) or not 0 <= points <= 1000:
+        raise ApiError("Points must be a whole number from 0 to 1000")
+    dues_only = payload.get("duesOnly", False)
+    if type(dues_only) is not bool:
+        raise ApiError("duesOnly must be true or false")
+
+    base = slug = _slugify(name)
+    suffix = 2
+    while conn.execute("SELECT 1 FROM events WHERE slug = %s", (slug,)).fetchone():
+        slug, suffix = f"{base}-{suffix}", suffix + 1
+    row = _row(conn.execute(
+        f"""INSERT INTO events (slug, name, held_on, date_label, location, points, audience)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING {EVENT_COLUMNS}""",
+        (slug, name, day, _date_label(day, start), location.strip() or None, points,
+         "dues" if dues_only else "public"),
+    ))
+    return _event_dict(row)
+
+
+def delete_event(conn, ident):
+    """Delete an event nobody has checked in to yet, unless the running kiosk is using it."""
+    event = find_event(conn, ident)
+    if event is None:
+        raise ApiError("Event not found")
+    with conn.transaction():
+        if conn.execute("SELECT 1 FROM checkins WHERE event_id = %s LIMIT 1", (event["id"],)).fetchone():
+            raise ApiError("People have checked in to this event, so it can't be deleted.")
+        kiosk = conn.execute("SELECT event_id, running FROM kiosk_settings WHERE id = 1").fetchone()
+        if kiosk and kiosk[0] == event["id"] and kiosk[1]:
+            raise ApiError("Stop the kiosk before deleting the event it's using.")
+        conn.execute("DELETE FROM events WHERE id = %s", (event["id"],))
+    return dict(status="deleted")
 
 
 def find_event(conn, ident):
@@ -156,6 +238,13 @@ def add_member(conn, name):
         "INSERT INTO members (name, display_id) VALUES (%s, %s) RETURNING id", (name, code)
     ).fetchone()[0]
     return _member_dict(find_member(conn, member_id))
+
+
+def remove_member(conn, ident):
+    """Delete a member entirely: their face data and attendance go with them (ON DELETE CASCADE)."""
+    row = member_or_error(conn, ident)
+    conn.execute("DELETE FROM members WHERE id = %s", (row["id"],))
+    return dict(status="removed", name=row["name"])
 
 
 def set_consent(conn, ident, value):
