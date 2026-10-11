@@ -239,3 +239,67 @@ def test_vercel_requires_admin_key(app_module, monkeypatch):
     module = importlib.reload(app_module)
     r = module.app.test_client().get("/api/state")
     assert r.status_code == 503 and "ADMIN_KEY" in r.get_json()["error"]
+
+
+def test_remove_member(app_module, admin):
+    sam = enroll(admin, "Sam Chen")
+    start(admin)
+    assert frame(admin, "Sam Chen#1")["status"] == "checked_in"
+    r = admin.post("/api/members/remove", json={"memberId": sam["id"]}).get_json()
+    assert r == {"status": "removed", "name": "Sam Chen"}
+    state = admin.get("/api/state").get_json()
+    assert "Sam Chen" not in {m["name"] for m in state["members"]}
+    assert state["attendance"] == []  # their check-ins went with them
+    with psycopg.connect(TEST_URL) as conn:  # and so did their face data
+        assert conn.execute("SELECT count(*) FROM face_embeddings").fetchone()[0] == 0
+    assert frame(admin, "Sam Chen#2")["status"] == "unknown"
+    assert admin.post("/api/members/remove", json={"memberId": sam["id"]}).get_json()["error"] == "Member not found"
+
+
+def test_create_event(admin):
+    r = admin.post("/api/events/add", json={
+        "name": "Hack Night!", "date": "2026-10-27", "time": "18:30",
+        "location": "HEC 101", "points": 15, "duesOnly": True,
+    })
+    event = r.get_json()
+    assert r.status_code == 200, event
+    assert event["id"] == "hack-night" and event["date"] == "Oct 27, 2026, 6:30 PM"
+    assert event["audience"] == "dues" and event["points"] == 15 and event["checkins"] == 0
+    # Same name again gets its own id; no time shows just the date
+    second = admin.post("/api/events/add", json={"name": "Hack Night!", "date": "2026-11-03"}).get_json()
+    assert second["id"] == "hack-night-2" and second["date"] == "Nov 3, 2026" and second["audience"] == "public"
+    # Purely numeric names can't be mistaken for a database id
+    assert admin.post("/api/events/add", json={"name": "2026", "date": "2026-11-04"}).get_json()["id"] == "event-2026"
+    events = admin.get("/api/state").get_json()["events"]
+    assert {"hack-night", "hack-night-2", "event-2026"} <= {e["id"] for e in events}
+    start(admin, "hack-night")  # the kiosk can use it right away
+
+
+def test_event_validation(admin):
+    def error(body):
+        r = admin.post("/api/events/add", json=body)
+        assert r.status_code == 400
+        return r.get_json()["error"]
+    assert error({"date": "2026-10-27"}) == "Enter an event name of 1–100 characters"
+    assert error({"name": "X"}) == "Choose a date for the event"
+    assert error({"name": "X", "date": "2026-02-30"}) == "Choose a date for the event"
+    assert "start time" in error({"name": "X", "date": "2026-10-27", "time": "6pm"})
+    assert "Points" in error({"name": "X", "date": "2026-10-27", "points": True})
+    assert "Points" in error({"name": "X", "date": "2026-10-27", "points": 5000})
+    assert error({"name": "X", "date": "2026-10-27", "bogus": 1}) == "Unknown event field"
+
+
+def test_delete_event_rules(admin):
+    new = admin.post("/api/events/add", json={"name": "Social", "date": "2026-11-10"}).get_json()
+    # The running kiosk's event can't be deleted
+    start(admin, new["id"])
+    assert "Stop the kiosk" in admin.post("/api/events/delete", json={"eventId": new["id"]}).get_json()["error"]
+    admin.post("/api/settings", json={"running": False})
+    # An event with check-ins can't be deleted
+    admin.post("/api/checkins", json={"memberId": "KH-0002", "eventId": new["id"]})
+    assert "checked in" in admin.post("/api/events/delete", json={"eventId": new["id"]}).get_json()["error"]
+    # An event nobody attended can
+    empty = admin.post("/api/events/add", json={"name": "Cancelled", "date": "2026-11-11"}).get_json()
+    assert admin.post("/api/events/delete", json={"eventId": empty["id"]}).get_json() == {"status": "deleted"}
+    assert empty["id"] not in {e["id"] for e in admin.get("/api/state").get_json()["events"]}
+    assert admin.post("/api/events/delete", json={"eventId": "nope"}).get_json()["error"] == "Event not found"
