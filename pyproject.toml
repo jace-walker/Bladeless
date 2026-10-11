@@ -12,5 +12,5 @@ dependencies = [
 ]
 
 [tool.vercel]
-# Tells Vercel which file holds the web app (server.py is the old local-only server).
+# Tells Vercel which file holds the web app.
 entrypoint = "app:app"
