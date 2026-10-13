@@ -6,16 +6,21 @@ between requests:
   * All data lives in Neon (see db.py), not in attendance.sqlite3 and faces.json.
   * POST /api/camera checks the frame right away instead of handing it to a
     background loop. The result is returned and also published for /api/display.
-  * Pairing keys come from the ADMIN_KEY and PHONE_KEY environment variables
-    instead of being printed at startup.
+  * Access is open by default, for a public demo. Setting ADMIN_KEY turns
+    pairing back on; keys come from environment variables instead of being
+    printed at startup.
 
 Pages are static files in public/. Vercel serves them directly; when you run
 the app locally with `flask --app app run`, this app serves them too.
 
 Environment variables:
   DATABASE_URL   Neon connection string (use the pooled one on Vercel)
-  ADMIN_KEY      key for the organizer's computer (required on Vercel)
-  PHONE_KEY      key for the attendee phone (optional)
+  ADMIN_KEY      optional. Unset: anyone with the link has full access (open demo).
+                 Set: every device must pair with this key first.
+  PHONE_CHECKIN  optional, off by default. "on" turns on check-in with the
+                 attendee phone's camera (guest.html).
+  PHONE_KEY      optional. Lets a paired phone use only the attendee screen and
+                 camera; needs ADMIN_KEY set and PHONE_CHECKIN=on.
 """
 
 import base64
@@ -86,16 +91,25 @@ def keys():
     return os.environ.get("ADMIN_KEY", ""), os.environ.get("PHONE_KEY", "")
 
 
+def open_access():
+    """No ADMIN_KEY set: the site is an open demo and nobody needs to pair."""
+    return not keys()[0]
+
+
+def phone_checkin():
+    """Check-in with the attendee phone's camera is off unless PHONE_CHECKIN=on."""
+    return os.environ.get("PHONE_CHECKIN", "").strip().lower() in ("on", "1", "true", "yes")
+
+
 def role():
     """'admin', 'phone' or None for this request."""
     admin_key, phone_key = keys()
     if not admin_key:
-        # No key configured: allowed only for local testing, like the original local demo.
-        return None if ON_VERCEL else "admin"
+        return "admin"  # open demo
     supplied = request.headers.get("Authorization", "").removeprefix("Bearer ") or request.cookies.get("blade_key", "")
     if supplied and secrets.compare_digest(supplied, admin_key):
         return "admin"
-    if supplied and phone_key and secrets.compare_digest(supplied, phone_key):
+    if supplied and phone_key and phone_checkin() and secrets.compare_digest(supplied, phone_key):
         return "phone"
     return None
 
@@ -110,8 +124,6 @@ def check_access():
         host = request.headers.get("Host", "")
         if origin and origin not in ("http://" + host, "https://" + host):
             return error(403, "Cross-origin requests are not allowed")
-    if ON_VERCEL and not keys()[0]:
-        return error(503, "Server not configured: set ADMIN_KEY in the Vercel project settings")
     current = role()
     if current == "admin" or (current == "phone" and path in PHONE_PATHS):
         return None
@@ -123,11 +135,15 @@ def pair():
     admin_key, phone_key = keys()
     payload = request.get_json(silent=True)
     key = payload.get("key") if isinstance(payload, dict) else None
+    if not admin_key:
+        return jsonify(target="/")  # open demo: nothing to pair
     if not isinstance(key, str) or not 0 < len(key) <= 200:
         return error(400, "Invalid request")
-    if admin_key and secrets.compare_digest(key, admin_key):
+    if secrets.compare_digest(key, admin_key):
         target = "/?admin=1"
     elif phone_key and secrets.compare_digest(key, phone_key):
+        if not phone_checkin():
+            return error(403, "Phone check-in is turned off")
         target = "/guest.html"
     else:
         return error(403, "Invalid pairing key")
@@ -149,6 +165,7 @@ def health():
     except Exception as e:
         database = f"error: {type(e).__name__}"
     return jsonify(ok=database == "ok", database=database, adminKeySet=bool(keys()[0]),
+                   openAccess=open_access(), phoneCheckin=phone_checkin(),
                    faceModel=face_engine.status)
 
 
@@ -156,7 +173,8 @@ def health():
 def state():
     data = db.state(conn())
     data.update(latestMatch=db.current_display(conn(), private=True),
-                vision=dict(status=face_engine.status, error=face_engine.error))
+                vision=dict(status=face_engine.status, error=face_engine.error),
+                access=dict(open=open_access(), phoneCheckin=phone_checkin()))
     return jsonify(data)
 
 

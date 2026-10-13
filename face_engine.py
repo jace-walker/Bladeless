@@ -1,12 +1,21 @@
 """Turns a camera snapshot (JPEG bytes) into a 512-number face embedding.
 
-Uses the same Facenet512 + OpenCV pipeline as face_check.py and the old local
-server, so embeddings from all three are interchangeable. Photos are decoded in
-memory and never saved.
+Faces are found with YuNet, OpenCV's small neural-network face detector, then
+turned into numbers with Facenet512. face_check.py uses the same pair, so
+embeddings from both are interchangeable. Photos are decoded in memory and
+never saved.
 
-On Vercel the only writable folder is /tmp, so the model weights (~90 MB) are
-downloaded there from the Hugging Face Hub the first time an instance needs them,
-then reused for as long as that instance stays warm.
+YuNet replaced OpenCV's older Haar cascade detector, which missed faces in dim
+light and at angles. Changing the detector changes how faces are cropped, so
+people enrolled with the old detector should delete their face data and enroll
+again. To make YuNet accept less certain faces (say, in a dark room), set the
+environment variable yunet_score_threshold below its default of 0.9 (DeepFace
+reads it).
+
+On Vercel the only writable folder is /tmp, so the model weights are downloaded
+there the first time an instance needs them: Facenet512 (~90 MB) from the
+Hugging Face Hub and YuNet (~230 KB) from OpenCV's GitHub. They are reused for as
+long as that instance stays warm.
 """
 
 import os
@@ -19,7 +28,7 @@ if ON_VERCEL:
     os.environ.setdefault("DEEPFACE_HOME", "/tmp")  # DeepFace keeps its weights here
 
 MODEL = "Facenet512"
-DETECTOR = "opencv"
+DETECTOR = "yunet"  # OpenCV's neural-network face detector
 WEIGHTS_FILE = "facenet512_weights.onnx"
 # DeepFace's author publishes the same weights on the Hugging Face Hub.
 HF_WEIGHTS_URL = "https://huggingface.co/serengil/deepface/resolve/main/" + WEIGHTS_FILE
