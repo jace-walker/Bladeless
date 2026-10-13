@@ -62,6 +62,9 @@ async function refresh(){
  if(!r.ok){let m='Server unavailable';try{m=(await r.json()).error||m}catch{}throw Error(m)}
  const next=await r.json();if(!Array.isArray(next.members)||!next.settings)throw Error('Local backend required');
  state=next;initialized=true;$('connection').textContent='● Connected · Face model: '+state.vision.status;render();
+ // Phone check-in is off unless the server turns it on (PHONE_CHECKIN=on)
+ const phoneOn=!!(state.access&&state.access.phoneCheckin),phoneOption=$('source').querySelector('option[value="phone"]');
+ phoneOption.hidden=phoneOption.disabled=!phoneOn;if(!phoneOn&&$('source').value==='phone')$('source').value='computer';
  if(state.settings.running&&$('source').value==='phone'&&!$('hide-preview').checked&&location.hash==='#kiosk')await updateRemotePreview();
  }catch(e){
  if(!initialized){preview=true;state.members=demoMembers;state.events=[{id:'intro-ai',name:'Intro to Artificial Intelligence'},{id:'intro-github',name:'Intro to GitHub and GitHub Etiquette'}];$('connection').textContent='Can’t reach the check-in server ('+e.message+'). Showing a preview with sample members; see /api/health.';render();}

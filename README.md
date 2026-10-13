@@ -4,7 +4,8 @@ Face check-in for club events. Members opt in and enroll five shots of their fac
 
 - **Hosting:** the Vercel deployment runs a Flask API (`app.py`).
 - **Data:** everything is stored in **Neon Postgres**, and **pgvector** does the face matching inside the database.
-- **Face model:** Facenet512 via DeepFace. Its weights load from the **Hugging Face Hub**.
+- **Face model:** OpenCV's YuNet detector finds the face, and Facenet512 (via DeepFace) turns it into numbers. Facenet512's weights load from the **Hugging Face Hub**.
+- **Access:** open by default, so anyone with the link can try the demo. Setting `ADMIN_KEY` turns pairing back on.
 
 ## How it fits together
 
@@ -26,7 +27,7 @@ Browser pages (public/)          Vercel function (app.py)                 Neon P
 | `face_engine.py` | Snapshot → embedding with DeepFace. Downloads the model weights from Hugging Face |
 | `schema.sql` | Creates and upgrades the Neon tables. Safe to run again |
 | `seed.sql` | Demo events and made-up members for trying the app |
-| `public/` | The web pages, which Vercel serves directly: `index.html` (enroll, kiosk, admin), `guest.html` (attendee phone), `pair.html` |
+| `public/` | The web pages, which Vercel serves directly: `index.html` (enroll, kiosk, admin), `guest.html` (attendee screen, and phone check-in when it's on), `pair.html` (only used when `ADMIN_KEY` is set) |
 | `face_check.py` | Terminal tool: enroll and check in with a webcam, using the same Neon database |
 | `tools/import_local_data.py` | Copies `faces.json` and `attendance.sqlite3` from the original local demo into Neon |
 | `tests/test_api.py` | API tests |
@@ -42,19 +43,23 @@ Browser pages (public/)          Vercel function (app.py)                 Neon P
    ```bash
    python tools/import_local_data.py --faces faces.json --sqlite attendance.sqlite3
    ```
-3. **Add environment variables.** In the Vercel project, go to **Settings → Environment Variables** and add:
+3. **Add environment variables.** In the Vercel project, go to **Settings → Environment Variables**. Only `DATABASE_URL` is required:
 
    | Name | Value |
    | --- | --- |
-   | `DATABASE_URL` | Neon's **pooled** connection string (in Neon's **Connect** dialog, turn **Connection pooling** on) |
-   | `ADMIN_KEY` | A long random key for the organizer's computer |
-   | `PHONE_KEY` | A different key for the attendee phone |
+   | `DATABASE_URL` | Required. Neon's **pooled** connection string (in Neon's **Connect** dialog, turn **Connection pooling** on) |
+   | `ADMIN_KEY` | Optional. Leave it unset for an open demo. Set it to a long random key to make every device pair first |
+   | `PHONE_CHECKIN` | Optional, off by default. Set to `on` to allow check-in with the attendee phone's camera |
+   | `PHONE_KEY` | Optional. A key for the attendee phone, used only when `ADMIN_KEY` is set and `PHONE_CHECKIN` is `on` |
+   | `yunet_score_threshold` | Optional, default `0.9`. How sure the face detector must be. Try `0.8` if it misses faces in a dark room |
 
    To make a key, run `python -c "import secrets; print(secrets.token_urlsafe(16))"`. Never commit these values.
 4. **Check the framework setting.** Under **Settings → Build and Deployment**, the framework preset should be **Flask**. Pick it if Vercel didn't detect it. `pyproject.toml` tells Vercel the app is `app:app`.
 5. **Redeploy.** Push to `main`, or use **Deployments → ⋯ → Redeploy**. Environment variable changes only apply after a redeploy.
-6. **Check the deployment.** Open `https://<your-project>.vercel.app/api/health`. It should show `"ok": true` and `"adminKeySet": true`.
-7. **Pair your devices.** Open `/pair.html` and enter `ADMIN_KEY` on the organizer's computer, or `PHONE_KEY` on the attendee phone.
+6. **Check the deployment.** Open `https://<your-project>.vercel.app/api/health`. It should show `"ok": true`. For an open demo, it also shows `"openAccess": true`.
+7. **Pair your devices (only if `ADMIN_KEY` is set).** Open `/pair.html` and enter `ADMIN_KEY` on the organizer's computer, or `PHONE_KEY` on the attendee phone.
+
+**Switching face detectors changes the embeddings.** Faces enrolled with the old Haar detector (before YuNet) match less reliably, so delete their face data and enroll them again.
 
 **Size and speed:** the deployment is about 450 MB, under Vercel's 500 MB limit for Python. If a future change pushes it over, add the environment variable `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. After a quiet period, the first request takes about 10 seconds while the face model loads; after that, each check takes about 0.2 seconds.
 
@@ -80,8 +85,8 @@ To refresh the copy with current data later, open the `preview` branch in Neon a
 The pages started as the local demo's and call the same endpoints. What changed when they moved to Vercel:
 
 - **Frames are checked right away.** The computer kiosk and the attendee phone send a frame to `POST /api/camera` about once a second (JPEG, at most 1024 px on each side and 250 KB). The server checks each one immediately and returns the result. The admin page and `/api/display` show the latest result.
-- **No phone preview or phone enrollment.** The old server relayed the phone's camera to the organizer's computer. Vercel can't hold frames between requests, so `GET /api/camera/frame` always returns 204. Enroll with the computer's camera. Phone check-in at the kiosk still works.
-- **Pairing.** Pages load without a key, and any API call that returns 403 sends you to `/pair.html`.
+- **No phone preview or phone enrollment.** The old server relayed the phone's camera to the organizer's computer. Vercel can't hold frames between requests, so `GET /api/camera/frame` always returns 204. Enroll with the computer's camera. Phone check-in is off unless `PHONE_CHECKIN` is `on`; the attendee screen still shows results either way.
+- **Pairing.** Only when `ADMIN_KEY` is set. Pages load without a key, and any API call that returns 403 sends you to `/pair.html`.
 - **Accurate wording.** Text about the local server and Cloudflare tunnel was updated, including the consent text, so it describes where frames now go.
 - **IDs are strings.** Member ids are numbers sent as strings (`"3"`), and events use their short id (`"intro-ai"`). Manual check-in also accepts a member code (`KH-0001`) or QR text `member:<id or code>`.
 
@@ -93,7 +98,7 @@ pip install -r requirements.txt
 flask --app app run --debug        # http://127.0.0.1:5000, serves public/ too
 ```
 
-Locally, if `ADMIN_KEY` isn't set, everything is open (handy for local testing). On Vercel, `ADMIN_KEY` is required.
+If `ADMIN_KEY` isn't set, everything is open, locally and on Vercel.
 
 The terminal tool also works with the same database. See the comment at the top of `face_check.py`. It needs the OpenCV build that can open windows (see the note in `requirements.txt`).
 
@@ -110,11 +115,11 @@ The face model is replaced with a stand-in, so the tests take a few seconds and 
 
 ## API
 
-All endpoints return JSON. Every endpoint except `/api/pair` and `/api/health` needs a paired device. The phone key can only use `/api/display` and `/api/camera`.
+All endpoints return JSON. With no `ADMIN_KEY` set, every endpoint is open. With one set, every endpoint except `/api/pair` and `/api/health` needs a paired device, and the phone key (when phone check-in is on) can only use `/api/display` and `/api/camera`.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/health` | Deployment check (database reachable, admin key set) |
+| `GET /api/health` | Deployment check (database reachable, open access or keys, phone check-in on or off) |
 | `POST /api/pair` `{key}` | Pair this browser (sets a cookie) |
 | `GET /api/state` | Members, events, attendance, recent results, settings, latest match |
 | `GET /api/display` | Latest result status for the attendee screen |

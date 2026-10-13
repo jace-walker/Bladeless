@@ -39,7 +39,7 @@ from pgvector.psycopg import register_vector
 load_dotenv(Path(__file__).with_name(".env"))
 
 MODEL = "Facenet512"   # produces 512-number embeddings
-DETECTOR = "opencv"    # fast face finder; "retinaface" is more accurate but slower
+DETECTOR = "yunet"     # OpenCV's neural-network face finder; must match face_engine.py
 THRESHOLD = 0.30       # max cosine distance to count as a match. Tune from the printed distances.
 CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
 SHOTS_PER_PERSON = 5
