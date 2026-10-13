@@ -52,6 +52,7 @@ def app_module(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", TEST_URL)
     monkeypatch.setenv("ADMIN_KEY", ADMIN)
     monkeypatch.setenv("PHONE_KEY", PHONE)
+    monkeypatch.setenv("PHONE_CHECKIN", "on")
     monkeypatch.delenv("VERCEL", raising=False)
     with psycopg.connect(TEST_URL, autocommit=True) as conn:
         conn.execute(f"DROP TABLE IF EXISTS {TABLES} CASCADE")
@@ -105,7 +106,7 @@ def start(client, event="intro-ai", **extra):
 
 def test_health_needs_no_key(app_module):
     data = app_module.app.test_client().get("/api/health").get_json()
-    assert data["ok"] and data["adminKeySet"]
+    assert data["ok"] and data["adminKeySet"] and not data["openAccess"] and data["phoneCheckin"]
 
 
 def test_pairing_and_access(app_module, phone):
@@ -233,12 +234,33 @@ def test_bad_frames(admin):
     assert admin.post("/api/camera", data=jpeg("x"), content_type="text/plain").status_code == 400
 
 
-def test_vercel_requires_admin_key(app_module, monkeypatch):
+def test_open_access_without_admin_key(app_module, monkeypatch):
+    # No ADMIN_KEY, even on Vercel: an open demo where nobody needs to pair
     monkeypatch.setenv("VERCEL", "1")
     monkeypatch.delenv("ADMIN_KEY")
     module = importlib.reload(app_module)
-    r = module.app.test_client().get("/api/state")
-    assert r.status_code == 503 and "ADMIN_KEY" in r.get_json()["error"]
+    monkeypatch.setattr(module.face_engine, "embed", fake_embed)
+    anyone = module.app.test_client()
+    assert anyone.get("/api/health").get_json()["openAccess"] is True
+    state = anyone.get("/api/state")
+    assert state.status_code == 200 and state.get_json()["access"]["open"] is True
+    assert anyone.post("/api/members/add", json={"name": "Visitor"}).status_code == 200
+    assert anyone.post("/api/pair", json={}).get_json() == {"target": "/"}  # nothing to pair
+    # Cross-site requests are still refused
+    r = anyone.post("/api/members/add", json={"name": "X"}, headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403
+
+
+def test_phone_checkin_off(app_module, monkeypatch, phone):
+    monkeypatch.delenv("PHONE_CHECKIN")  # the default: off
+    client = app_module.app.test_client()
+    assert client.get("/api/health").get_json()["phoneCheckin"] is False
+    r = client.post("/api/pair", json={"key": PHONE})
+    assert r.status_code == 403 and r.get_json()["error"] == "Phone check-in is turned off"
+    assert phone.get("/api/display").status_code == 403  # a phone paired earlier is shut out too
+    admin = app_module.app.test_client()
+    admin.post("/api/pair", json={"key": ADMIN})
+    assert admin.get("/api/state").get_json()["access"] == {"open": False, "phoneCheckin": False}
 
 
 def test_remove_member(app_module, admin):
