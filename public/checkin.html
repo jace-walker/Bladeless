@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Check in — Blade demo</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body class="app">
+<div class="demo-banner" role="note">
+  <strong>Demo</strong>
+  <span>Face check-in for Blade. <span id="reset-note" hidden>Everything here is cleared every night.</span></span>
+  <a href="/#about">About this demo</a>
+</div>
+<header class="app-header">
+  <a class="back-home" href="/"><span aria-hidden="true">←</span> Blade</a>
+  <nav aria-label="Check-in pages">
+    <a href="#kiosk">Check in</a>
+    <a href="#enroll">Add my face</a>
+    <a href="#admin" class="nav-quiet">Organizer</a>
+  </nav>
+</header>
+<main>
+  <p id="offline" class="offline" role="status" hidden></p>
+
+  <!-- ===== Check in ===== -->
+  <section id="kiosk" class="view">
+    <div class="view-title">
+      <h1>Check in</h1>
+      <p class="event-line">Event: <strong id="kiosk-event">…</strong></p>
+    </div>
+    <div class="stage" id="kiosk-wrap">
+      <video id="kiosk-video" class="mirror" playsinline muted hidden></video>
+      <div class="face-boxes" id="face-boxes" aria-hidden="true"></div>
+      <div class="stage-cover" id="kiosk-cover">
+        <button class="primary huge" id="kiosk-start">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          Start the camera
+        </button>
+        <p id="kiosk-cover-text">Then just look at the camera.</p>
+      </div>
+      <div class="stage-note" id="kiosk-ready" hidden><span class="spinner" aria-hidden="true"></span> Getting ready…</div>
+    </div>
+    <div class="result" id="kiosk-result" data-tone="idle" aria-live="polite">
+      <span class="result-mark" id="kiosk-mark" aria-hidden="true"></span>
+      <div>
+        <p class="result-title" id="kiosk-title">Press “Start the camera” to begin.</p>
+        <p class="result-sub" id="kiosk-sub"></p>
+      </div>
+    </div>
+    <ul class="others" id="kiosk-others" aria-label="Everyone in view" hidden></ul>
+    <div class="stage-actions">
+      <a class="button-link" href="#enroll">New here? Add my face</a>
+      <button id="kiosk-stop" hidden>Stop the camera</button>
+    </div>
+  </section>
+
+  <!-- ===== Add my face ===== -->
+  <section id="enroll" class="view" hidden>
+    <div class="view-title">
+      <h1>Add my face</h1>
+      <p class="lead">Do this once. After that, you check in just by looking at the camera.</p>
+    </div>
+    <ol class="steps" aria-label="Steps">
+      <li id="step-label-choose">Your name</li>
+      <li id="step-label-consent">Say OK</li>
+      <li id="step-label-photos">5 pictures</li>
+    </ol>
+
+    <article class="card enroll-card" id="step-choose">
+      <h2 tabindex="-1">What's your name?</h2>
+      <div class="name-row">
+        <input id="member-search" type="text" autocomplete="off" placeholder="Type your name" maxlength="80" aria-label="Your name">
+        <button class="primary big" id="choose-next">Next</button>
+      </div>
+      <div id="member-results" class="member-results"></div>
+      <p id="choose-message" class="feedback" role="status"></p>
+    </article>
+
+    <article class="card enroll-card" id="step-consent" hidden>
+      <h2 tabindex="-1" id="consent-title">Is it OK to save your face?</h2>
+      <ul class="plain-list">
+        <li>We save numbers that describe your face, not your picture.</li>
+        <li>Your pictures go to the check-in server over a secure connection, are used once, and are never saved.</li>
+        <li>You can delete your face any time. <span id="consent-nightly" hidden>This demo also deletes everyone's face every night.</span></li>
+        <li><strong>Only add your own face.</strong></li>
+      </ul>
+      <div class="actions">
+        <button class="primary big" id="consent-agree">Yes, save my face</button>
+        <button class="big" id="consent-cancel">No thanks</button>
+      </div>
+      <p id="consent-message" class="feedback" role="status"></p>
+    </article>
+
+    <article class="card enroll-card done-step" id="step-enrolled" hidden>
+      <span class="done-mark" aria-hidden="true">✓</span>
+      <h2 tabindex="-1" id="enrolled-title">You're already set up!</h2>
+      <p id="enrolled-text" class="muted"></p>
+      <div class="actions">
+        <a class="button-link primary big" href="#kiosk" data-autostart>Check in now</a>
+        <button class="big" id="enrolled-more">Take 5 more pictures</button>
+      </div>
+      <div class="actions quiet-actions">
+        <button class="link-button" id="enrolled-back">That's not me</button>
+        <button class="link-button danger" id="enrolled-delete">Delete my face</button>
+      </div>
+      <p id="enrolled-message" class="feedback" role="status"></p>
+    </article>
+
+    <article class="card enroll-card capture-step" id="step-capture" hidden>
+      <div class="stage">
+        <video id="enroll-video" class="mirror" playsinline muted></video>
+        <div class="face-guide" aria-hidden="true"></div>
+        <span class="camera-placeholder" id="enroll-placeholder">Starting camera…</span>
+      </div>
+      <div class="capture-panel">
+        <h2 tabindex="-1" id="capture-title">Picture 1 of 5</h2>
+        <p class="shot-prompt"><span class="prompt-icon" id="prompt-icon" aria-hidden="true"></span><span id="shot-prompt">Look straight at the camera</span></p>
+        <ol class="shot-dots" id="shot-dots" aria-label="Pictures taken"></ol>
+        <button class="primary huge" id="capture" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          <span id="capture-label">Take picture</span>
+        </button>
+        <p class="small muted">Or press the space bar.</p>
+        <p id="capture-message" class="feedback" role="status"></p>
+        <div class="capture-extra">
+          <button class="link-button" id="camera-retry" hidden>Try the camera again</button>
+          <button class="link-button" id="capture-back">Start over</button>
+        </div>
+      </div>
+    </article>
+
+    <article class="card enroll-card done-step" id="step-done" hidden>
+      <span class="done-mark" aria-hidden="true">✓</span>
+      <h2 tabindex="-1" id="done-title">All done!</h2>
+      <p class="lead">Now try it: check in by looking at the camera.</p>
+      <div class="actions">
+        <a class="button-link primary big" href="#kiosk" data-autostart>Check in now</a>
+        <button class="big" id="done-another">Add someone else</button>
+      </div>
+    </article>
+  </section>
+
+  <!-- ===== Organizer ===== -->
+  <section id="admin" class="view" hidden>
+    <div class="view-title heading-row">
+      <div>
+        <h1>Organizer</h1>
+        <p id="connection" class="connection" role="status">Connecting to the check-in server…</p>
+      </div>
+      <a class="button-link" href="guest.html" target="_blank" rel="noopener">Open attendee screen ↗</a>
+    </div>
+
+    <article class="card live-card" aria-live="polite">
+      <span id="admin-symbol" class="result-icon">—</span>
+      <div>
+        <h2 id="admin-title">Waiting for a face</h2>
+        <p id="admin-member-id"></p>
+        <p id="admin-dues"></p>
+        <p id="admin-method" class="muted small"></p>
+        <p id="admin-error" class="error small"></p>
+      </div>
+    </article>
+
+    <h2 class="section-title">Check-in settings</h2>
+    <article class="card">
+      <div class="settings-grid">
+        <label class="field">Event
+          <select id="event"></select>
+        </label>
+        <label class="field">Camera
+          <select id="source">
+            <option value="computer">This computer</option>
+            <option value="phone">Paired phone</option>
+          </select>
+        </label>
+        <div class="field">
+          <label for="threshold">Match strictness <output id="threshold-value">0.30</output></label>
+          <input id="threshold" type="range" min="0.10" max="0.60" step="0.01" value="0.30">
+        </div>
+      </div>
+      <div class="controls">
+        <label><input id="liveness" type="checkbox"> Require liveness</label>
+        <label><input id="hide-preview" type="checkbox"> Hide the camera picture on the check-in screen</label>
+      </div>
+      <p class="small muted">Lower strictness is stricter: fewer wrong matches, but more “I don't know you yet.” Liveness uses DeepFace's anti-spoofing model; it isn't a guarantee against someone holding up a photo.</p>
+      <p class="small muted" id="kiosk-state"></p>
+      <div class="divider"></div>
+      <form id="manual-form" class="controls">
+        <label for="manual-id">Check someone in by member ID</label>
+        <input id="manual-id" placeholder="KH-0003" required>
+        <button>Check in</button>
+        <button type="button" id="scan-qr">Scan a QR code</button>
+      </form>
+      <video id="qr-video" class="qr-video mirror" playsinline muted hidden></video>
+      <p id="manual-message" class="small muted" role="status">Member IDs work without face check-in.</p>
+    </article>
+
+    <h2 class="section-title">Members</h2>
+    <article class="card table-card">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Name</th><th>Member ID</th><th>Dues</th><th>Events attended</th><th>Face check-in</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody id="members-table"></tbody>
+        </table>
+      </div>
+    </article>
+
+    <h2 class="section-title">Events</h2>
+    <p class="muted narrow">Events appear in the event list above. You can delete an event until someone checks in to it.</p>
+    <article class="card table-card">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Event</th><th>Date</th><th>Location</th><th>Points</th><th>Who can check in</th><th>Check-ins</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody id="events-table"></tbody>
+        </table>
+      </div>
+      <form id="event-form" class="event-form">
+        <h3>New event</h3>
+        <div class="event-fields">
+          <label class="field wide">Name<input id="event-name" required maxlength="100"></label>
+          <label class="field">Date<input id="event-date" type="date" required></label>
+          <label class="field">Start time<input id="event-time" type="time"></label>
+          <label class="field">Location<input id="event-location" maxlength="80"></label>
+          <label class="field narrow-field">Points<input id="event-points" type="number" min="0" max="1000" step="1" value="10" required></label>
+        </div>
+        <div class="controls">
+          <label><input id="event-dues" type="checkbox"> Paid members only</label>
+          <button class="primary">Create event</button>
+        </div>
+        <p id="event-message" class="feedback" role="status"></p>
+      </form>
+    </article>
+
+    <h2 class="section-title">Recent check-ins</h2>
+    <article class="card"><div id="recent" class="recent"></div></article>
+    <button id="reset" class="danger reset">Reset attendance</button>
+    <p class="small muted">Reset clears recorded attendance and recent results. Members and their face data stay.</p>
+  </section>
+
+  <footer>A student demo, independent of the real Blade portal. Camera pictures are never saved.</footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

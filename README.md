@@ -1,17 +1,18 @@
 # Blade face check-in
 
-Face check-in for club events. Members opt in and enroll five shots of their face. At an event, a laptop or phone at the door checks them in when it recognizes them. Organizers manage members, dues, consent, and attendance from an admin page.
+Face check-in for club events. Members opt in and enroll five shots of their face. At an event, a laptop at the door checks them in when it recognizes them, several people at once if they arrive together. Organizers manage members, dues, consent, and attendance from an admin page.
 
 - **Hosting:** the Vercel deployment runs a Flask API (`app.py`).
 - **Data:** everything is stored in **Neon Postgres**, and **pgvector** does the face matching inside the database.
 - **Face model:** OpenCV's YuNet detector finds the face, and Facenet512 (via DeepFace) turns it into numbers. Facenet512's weights load from the **Hugging Face Hub**.
-- **Access:** open by default, so anyone with the link can try the demo. Setting `ADMIN_KEY` turns pairing back on.
+- **Access:** open by default, so anyone with the link can try the demo. Setting `ADMIN_KEY` turns pairing back on. With `CRON_SECRET` set, the demo resets itself every night.
+- **Pages:** a Blade-style homepage (`/`) with the demo's Check-in and About sections; the check-in app itself is `/checkin.html`.
 
 ## How it fits together
 
 ```
 Browser pages (public/)          Vercel function (app.py)                 Neon Postgres
- kiosk / profile / admin   --->   /api/... endpoints                --->   members, events, checkins,
+ check in / enroll / admin --->   /api/... endpoints                --->   members, events, checkins,
  attendee phone page              face_engine.py: snapshot -> embedding    face_embeddings (pgvector),
                                   db.py: all the SQL                       kiosk settings + latest result
 ```
@@ -27,7 +28,8 @@ Browser pages (public/)          Vercel function (app.py)                 Neon P
 | `face_engine.py` | Snapshot → embedding with DeepFace. Downloads the model weights from Hugging Face |
 | `schema.sql` | Creates and upgrades the Neon tables. Safe to run again |
 | `seed.sql` | Demo events and made-up members for trying the app |
-| `public/` | The web pages, which Vercel serves directly: `index.html` (enroll, kiosk, admin), `guest.html` (attendee screen, and phone check-in when it's on), `pair.html` (only used when `ADMIN_KEY` is set) |
+| `public/` | The web pages, which Vercel serves directly: `index.html` (the Blade-style homepage), `checkin.html` (check in, add my face, organizer), `guest.html` (attendee screen, and phone check-in when it's on), `pair.html` (only used when `ADMIN_KEY` is set) |
+| `vercel.json` | Schedules the nightly demo reset (Vercel Cron Jobs) |
 | `face_check.py` | Terminal tool: enroll and check in with a webcam, using the same Neon database |
 | `tools/import_local_data.py` | Copies `faces.json` and `attendance.sqlite3` from the original local demo into Neon |
 | `tests/test_api.py` | API tests |
@@ -51,6 +53,7 @@ Browser pages (public/)          Vercel function (app.py)                 Neon P
    | `ADMIN_KEY` | Optional. Leave it unset for an open demo. Set it to a long random key to make every device pair first |
    | `PHONE_CHECKIN` | Optional, off by default. Set to `on` to allow check-in with the attendee phone's camera |
    | `PHONE_KEY` | Optional. A key for the attendee phone, used only when `ADMIN_KEY` is set and `PHONE_CHECKIN` is `on` |
+   | `CRON_SECRET` | Optional. Turns on the nightly reset. Any long random value; Vercel sends it with each scheduled call |
    | `yunet_score_threshold` | Optional, default `0.9`. How sure the face detector must be. Try `0.8` if it misses faces in a dark room |
 
    To make a key, run `python -c "import secrets; print(secrets.token_urlsafe(16))"`. Never commit these values.
@@ -58,6 +61,10 @@ Browser pages (public/)          Vercel function (app.py)                 Neon P
 5. **Redeploy.** Push to `main`, or use **Deployments → ⋯ → Redeploy**. Environment variable changes only apply after a redeploy.
 6. **Check the deployment.** Open `https://<your-project>.vercel.app/api/health`. It should show `"ok": true`. For an open demo, it also shows `"openAccess": true`.
 7. **Pair your devices (only if `ADMIN_KEY` is set).** Open `/pair.html` and enter `ADMIN_KEY` on the organizer's computer, or `PHONE_KEY` on the attendee phone.
+
+**The nightly reset.** `vercel.json` asks Vercel to call `/api/cron/reset-demo` once a day at 08:00 UTC (about 4 AM Eastern; on the free plan it runs at some point within that hour, and only on the production deployment). The call deletes every member, face, check-in and event visitors added, then restores the made-up members and events from `seed.sql`. It only runs when `CRON_SECRET` is set; anyone calling it without that secret is refused.
+
+**After pulling an update that changes `schema.sql`,** run `python face_check.py setup` against your database (or paste `schema.sql` into Neon's SQL Editor). It's safe to run again and only adds what's missing, such as the index that keeps matching fast as membership grows.
 
 **Switching face detectors changes the embeddings.** Faces enrolled with the old Haar detector (before YuNet) match less reliably, so delete their face data and enroll them again.
 
@@ -76,15 +83,17 @@ To refresh the copy with current data later, open the `preview` branch in Neon a
 
 ## The pages (`public/`)
 
-`index.html` has three tabs:
+`index.html` is a Blade-style homepage. It has Blade's member sections (Dashboard, Events, Dues, Forms, Settings), each marked as not part of the demo, plus the two that work here: **Check-in**, which links into the app, and **About**, a short version of this README.
 
-- **Enroll:** a guided flow for organizers. Choose a member (or add a new one), have them agree to the consent text, then take five photos with a prompt for each angle.
-- **Check-in kiosk:** the door camera, match strictness, liveness, the current event, and manual or QR check-in.
-- **Admin:** live results, members (dues, face data, remove), events (create, delete before anyone checks in), recent check-ins, and reset.
+`checkin.html` is the app, written so anyone can use it without help:
+
+- **Check in:** one big “Start the camera” button. The page loads the face model while the camera starts, then sends a snapshot about every half second. Each person in view gets a box and their first name, and the result is in plain words (“Hi, Sam! You're checked in.”). Up to four people near the camera are checked in from the same snapshot; people much farther back than the nearest face are ignored.
+- **Add my face:** type your name, say OK to the consent text, and take five pictures, each with a simple prompt (“Turn your head a little to your left”). “Check in now” on the last screen starts the camera straight away.
+- **Organizer:** live results, the event, match strictness, liveness, manual or QR check-in, members (dues, face data, remove), events (create, delete before anyone checks in), recent check-ins, and reset.
 
 The pages started as the local demo's and call the same endpoints. What changed when they moved to Vercel:
 
-- **Frames are checked right away.** The computer kiosk and the attendee phone send a frame to `POST /api/camera` about once a second (JPEG, at most 1024 px on each side and 250 KB). The server checks each one immediately and returns the result. The admin page and `/api/display` show the latest result.
+- **Frames are checked right away.** The computer kiosk and the attendee phone send a frame to `POST /api/camera` about every half second (JPEG, at most 1024 px on each side and 250 KB). The server checks each one immediately and returns the result. The admin page and `/api/display` show the latest result.
 - **No phone preview or phone enrollment.** The old server relayed the phone's camera to the organizer's computer. Vercel can't hold frames between requests, so `GET /api/camera/frame` always returns 204. Enroll with the computer's camera. Phone check-in is off unless `PHONE_CHECKIN` is `on`; the attendee screen still shows results either way.
 - **Pairing.** Only when `ADMIN_KEY` is set. Pages load without a key, and any API call that returns 403 sends you to `/pair.html`.
 - **Accurate wording.** Text about the local server and Cloudflare tunnel was updated, including the consent text, so it describes where frames now go.
@@ -135,5 +144,9 @@ All endpoints return JSON. With no `ADMIN_KEY` set, every endpoint is open. With
 | `POST /api/members/remove` `{memberId}` | Remove a member, along with their face data and attendance |
 | `POST /api/events/add` `{name, date, time?, location?, points?, duesOnly?}` | Create an event (`date` as `YYYY-MM-DD`, `time` as `HH:MM`) |
 | `POST /api/events/delete` `{eventId}` | Delete an event nobody has checked in to |
+| `POST /api/warmup` | Load the face model now, so the first check-in doesn't wait for it |
+| `GET /api/cron/reset-demo` | The nightly reset. Needs `Authorization: Bearer <CRON_SECRET>` |
+
+`POST /api/camera` returns the nearest face's result, plus `faces`: one result per face near the camera, each with its `box` (`x`, `y`, `w`, `h` in the frame's pixels).
 
 Possible check-in results: `checked_in`, `already_checked_in`, `dues_required`, `not_enrolled`, `member_not_found`, `unknown`, `liveness_failed`, `camera_error`, `idle`.
