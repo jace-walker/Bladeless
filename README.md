@@ -6,7 +6,7 @@ Face check-in for club events. Members opt in and enroll five shots of their fac
 - **Data:** everything is stored in **Neon Postgres**, and **pgvector** does the face matching inside the database.
 - **Face model:** OpenCV's YuNet detector finds the face, and Facenet512 (via DeepFace) turns it into numbers. Facenet512's weights load from the **Hugging Face Hub**.
 - **Access:** open by default, so anyone with the link can try the demo. Setting `ADMIN_KEY` turns pairing back on. With `CRON_SECRET` set, the demo resets itself every night.
-- **Pages:** a Blade-style homepage (`/`) with the demo's Check-in and About sections; the check-in app itself is `/checkin.html`.
+- **Pages:** a Blade-style homepage (`/`) whose Check-in section leads to the check-in app, `/checkin.html`.
 
 ## How it fits together
 
@@ -83,7 +83,7 @@ To refresh the copy with current data later, open the `preview` branch in Neon a
 
 ## The pages (`public/`)
 
-`index.html` is a Blade-style homepage. It has Blade's member sections (Dashboard, Events, Dues, Forms, Settings), each marked as not part of the demo, plus the two that work here: **Check-in**, which links into the app, and **About**, a short version of this README.
+`index.html` is a Blade-style homepage. It has Blade's member sections (Dashboard, Events, Dues, Forms, Settings), each marked as not part of the demo, plus the one that works here: **Check-in**, which links into the app.
 
 `checkin.html` is the app, written so anyone can use it without help:
 
