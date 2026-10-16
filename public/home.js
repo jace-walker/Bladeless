@@ -1,5 +1,5 @@
 'use strict';
-// The Blade-style homepage: Check-in and About work; the other sections are placeholders.
+// The Blade-style homepage: Check-in works; the other sections are placeholders.
 
 // Links from before the homepage existed (/#kiosk, /?admin=1) go to the check-in page.
 const oldLinks = {'#kiosk': '#kiosk', '#enroll': '#enroll', '#profile': '#enroll', '#admin': '#admin'};
@@ -20,7 +20,7 @@ const placeholders = {
 
 function show(moveFocus) {
   const id = location.hash.slice(1);
-  const view = id === 'about' || placeholders[id] ? id : 'checkin';
+  const view = placeholders[id] ? id : 'checkin';
   const panel = placeholders[view] ? 'placeholder' : view;
   for (const section of document.querySelectorAll('.panel')) section.hidden = section.id !== panel;
   if (placeholders[view]) {
@@ -31,16 +31,10 @@ function show(moveFocus) {
     if (link.dataset.view === view) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   }
-  const name = placeholders[view]?.name || (view === 'about' ? 'About' : 'Check-in');
+  const name = placeholders[view]?.name || 'Check-in';
   document.title = `${name} — Blade demo`;
   if (moveFocus) document.getElementById(panel).querySelector('h1').focus();
 }
 
 window.addEventListener('hashchange', () => { if (!redirectOldLink()) show(true); });
 if (!redirectOldLink()) show(false);
-
-// Mention the nightly reset only when it's switched on
-fetch('/api/health', {cache: 'no-store'})
-  .then(r => r.json())
-  .then(h => { if (h.nightlyReset) document.querySelectorAll('[data-nightly]').forEach(el => { el.hidden = false; }); })
-  .catch(() => {});
