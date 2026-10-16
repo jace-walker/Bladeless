@@ -84,10 +84,15 @@ def load():
     _loaded, status, error = True, "Ready", None
 
 
-def embed(jpeg, anti_spoofing=False):
-    """Return the embedding (a list of 512 floats) for the biggest face in the
-    JPEG, or None if there's no face. Raises ValueError for a bad image and
-    LivenessFailed if the liveness check rejects the face."""
+def warm():
+    """Load the models now, so the first check-in or photo doesn't wait ~10 s for them."""
+    with _lock:
+        load()
+
+
+def _faces(jpeg, anti_spoofing, max_faces):
+    """Run the detector and Facenet512 on a JPEG. Returns DeepFace's results,
+    biggest face first, or [] if there's no face."""
     import cv2
     import numpy as np
 
@@ -105,15 +110,50 @@ def embed(jpeg, anti_spoofing=False):
                 frame,                  # OpenCV gives BGR, which is what DeepFace expects
                 model_name=MODEL,
                 detector_backend=DETECTOR,
-                max_faces=1,            # if several people are in view, use the biggest face
+                max_faces=max_faces,    # keeps the biggest faces
                 anti_spoofing=anti_spoofing,
             )
         except FaceNotDetected:
-            return None
+            return []
         except SpoofDetected:
             raise LivenessFailed("Liveness check failed")
+    return sorted(faces, key=lambda f: f["facial_area"]["w"] * f["facial_area"]["h"], reverse=True)
 
-    embedding = [float(v) for v in faces[0]["embedding"]]
+
+def _clean(values):
+    import numpy as np
+    embedding = [float(v) for v in values]
     if len(embedding) != 512 or not all(np.isfinite(embedding)) or not any(embedding):
         raise ValueError("Invalid face embedding")
     return embedding
+
+
+def embed(jpeg, anti_spoofing=False):
+    """Return the embedding (a list of 512 floats) for the biggest face in the
+    JPEG, or None if there's no face. Used for enrollment photos. Raises
+    ValueError for a bad image and LivenessFailed if the liveness check rejects
+    the face."""
+    faces = _faces(jpeg, anti_spoofing, max_faces=1)
+    return _clean(faces[0]["embedding"]) if faces else None
+
+
+MAX_FACES = 4            # most faces checked in one kiosk frame
+NEAR_FACE_RATIO = 0.5    # other faces must be at least half as wide as the biggest one
+
+
+def embed_faces(jpeg, anti_spoofing=False):
+    """Return every face near the camera, biggest first, as dicts with
+    'embedding' (512 floats) and 'box' ({x, y, w, h} in the JPEG's pixels).
+    People much farther back than the nearest face (narrower than half its
+    width) are ignored, so someone walking past in the background isn't
+    checked in. Returns [] if there's no face."""
+    faces = _faces(jpeg, anti_spoofing, max_faces=MAX_FACES)
+    if not faces:
+        return []
+    widest = faces[0]["facial_area"]["w"]
+    near = [faces[0]] + [f for f in faces[1:] if f["facial_area"]["w"] >= NEAR_FACE_RATIO * widest]
+    return [
+        dict(embedding=_clean(f["embedding"]),
+             box={k: int(f["facial_area"][k]) for k in ("x", "y", "w", "h")})
+        for f in near
+    ]
