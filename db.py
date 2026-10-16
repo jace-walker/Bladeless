@@ -450,6 +450,27 @@ def reset_attendance(conn):
     return dict(status="reset")
 
 
+def reset_demo(conn, seed_sql):
+    """Put the open demo back to how it started: everything visitors added
+    (members, face data, attendance, events) is deleted and the made-up members
+    and events from seed.sql are restored. Runs nightly (see vercel.json)."""
+    with conn.transaction():
+        removed = conn.execute("SELECT count(*) FROM face_embeddings").fetchone()[0]
+        conn.execute("DELETE FROM checkin_log")
+        conn.execute("DELETE FROM checkins")
+        conn.execute("DELETE FROM face_embeddings")
+        conn.execute("DELETE FROM members")
+        conn.execute(
+            """UPDATE kiosk_settings
+               SET event_id = NULL, threshold = 0.30, require_liveness = false, running = false
+               WHERE id = 1"""
+        )
+        conn.execute("DELETE FROM events")
+        conn.execute(seed_sql)
+    publish(conn, dict(status="idle"))
+    return dict(status="reset", faceShotsDeleted=removed)
+
+
 # ---------- what the screens show ----------
 
 def publish(conn, data):

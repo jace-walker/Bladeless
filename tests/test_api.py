@@ -45,6 +45,16 @@ def fake_embed(data, anti_spoofing=False):
     return [float(v) for v in base + noise]
 
 
+def fake_embed_faces(data, anti_spoofing=False):
+    """Several faces in one frame: 'Sam Chen#1+Stranger' is two people."""
+    faces = []
+    for i, label in enumerate(data[2:-2].decode().split("+")):
+        embedding = fake_embed(b"\xff\xd8" + label.encode() + b"\xff\xd9", anti_spoofing)
+        if embedding is not None:
+            faces.append(dict(embedding=embedding, box=dict(x=10 + 150 * i, y=40, w=120, h=150)))
+    return faces
+
+
 @pytest.fixture()
 def app_module(monkeypatch):
     if TEST_URL == os.environ.get("DATABASE_URL"):
@@ -61,6 +71,9 @@ def app_module(monkeypatch):
     import app as app_module
     app_module = importlib.reload(app_module)
     monkeypatch.setattr(app_module.face_engine, "embed", fake_embed)
+    monkeypatch.setattr(app_module.face_engine, "embed_faces", fake_embed_faces)
+    monkeypatch.setattr(app_module.face_engine, "warm", lambda: None)
+    monkeypatch.delenv("CRON_SECRET", raising=False)
     monkeypatch.setattr(app_module, "FRAME_INTERVAL_SECONDS", 0)
     return app_module
 
@@ -107,6 +120,7 @@ def start(client, event="intro-ai", **extra):
 def test_health_needs_no_key(app_module):
     data = app_module.app.test_client().get("/api/health").get_json()
     assert data["ok"] and data["adminKeySet"] and not data["openAccess"] and data["phoneCheckin"]
+    assert data["nightlyReset"] is False
 
 
 def test_pairing_and_access(app_module, phone):
@@ -245,7 +259,7 @@ def test_open_access_without_admin_key(app_module, monkeypatch):
     state = anyone.get("/api/state")
     assert state.status_code == 200 and state.get_json()["access"]["open"] is True
     assert anyone.post("/api/members/add", json={"name": "Visitor"}).status_code == 200
-    assert anyone.post("/api/pair", json={}).get_json() == {"target": "/"}  # nothing to pair
+    assert anyone.post("/api/pair", json={}).get_json() == {"target": "/checkin.html"}  # nothing to pair
     # Cross-site requests are still refused
     r = anyone.post("/api/members/add", json={"name": "X"}, headers={"Origin": "https://evil.example"})
     assert r.status_code == 403
@@ -260,7 +274,8 @@ def test_phone_checkin_off(app_module, monkeypatch, phone):
     assert phone.get("/api/display").status_code == 403  # a phone paired earlier is shut out too
     admin = app_module.app.test_client()
     admin.post("/api/pair", json={"key": ADMIN})
-    assert admin.get("/api/state").get_json()["access"] == {"open": False, "phoneCheckin": False}
+    access = admin.get("/api/state").get_json()["access"]
+    assert access["open"] is False and access["phoneCheckin"] is False
 
 
 def test_remove_member(app_module, admin):
@@ -325,3 +340,65 @@ def test_delete_event_rules(admin):
     assert admin.post("/api/events/delete", json={"eventId": empty["id"]}).get_json() == {"status": "deleted"}
     assert empty["id"] not in {e["id"] for e in admin.get("/api/state").get_json()["events"]}
     assert admin.post("/api/events/delete", json={"eventId": "nope"}).get_json()["error"] == "Event not found"
+
+
+def test_multiple_faces(admin):
+    enroll(admin, "Sam Chen")
+    enroll(admin, "Alex Rivera")
+    start(admin)
+    result = frame(admin, "Sam Chen#a+Alex Rivera#b+Stranger")
+    faces = result["faces"]
+    assert [f["status"] for f in faces] == ["checked_in", "checked_in", "unknown"]
+    assert [f.get("member", {}).get("name") for f in faces] == ["Sam Chen", "Alex Rivera", None]
+    assert all(set(f["box"]) == {"x", "y", "w", "h"} for f in faces)
+    assert result["status"] == "checked_in" and result["member"]["name"] == "Sam Chen"  # nearest face
+    state = admin.get("/api/state").get_json()
+    assert len(state["attendance"]) == 2
+    assert {r["status"] for r in state["recent"]} == {"checked_in", "unknown"}
+    assert all("box" not in r for r in state["recent"])
+    # Next frame: both are already in; one face alone still works the old way
+    again = frame(admin, "Sam Chen#c+Alex Rivera#d")
+    assert [f["status"] for f in again["faces"]] == ["already_checked_in", "already_checked_in"]
+    assert len(frame(admin, "Sam Chen#e")["faces"]) == 1
+
+
+def test_warmup(app_module, admin, monkeypatch):
+    calls = []
+    monkeypatch.setattr(app_module.face_engine, "warm", lambda: calls.append(1))
+    r = admin.post("/api/warmup", json={})
+    assert r.status_code == 200 and calls == [1]
+
+    def broken():
+        raise RuntimeError("weights missing")
+    monkeypatch.setattr(app_module.face_engine, "warm", broken)
+    r = admin.post("/api/warmup", json={})
+    assert r.status_code == 503 and "weights missing" in r.get_json()["error"]
+
+
+def test_nightly_reset(app_module, admin, monkeypatch):
+    anyone = app_module.app.test_client()
+    url = "/api/cron/reset-demo"
+    assert anyone.get(url).status_code == 503  # off until CRON_SECRET is set
+    monkeypatch.setenv("CRON_SECRET", "cron-test-secret")
+    assert admin.get("/api/health").get_json()["nightlyReset"] is True
+    assert anyone.get(url).status_code == 403
+    assert anyone.get(url, headers={"Authorization": "Bearer wrong"}).status_code == 403
+    assert anyone.get(url, headers={"Authorization": "Bearer caf\u00e9"}).status_code == 403
+
+    # Visitors add a member, enroll, check in, create an event and change settings
+    admin.post("/api/members/add", json={"name": "Visitor"})
+    enroll(admin, "Visitor")
+    enroll(admin, "Sam Chen")
+    start(admin, threshold=0.4)
+    assert frame(admin, "Sam Chen#1")["status"] == "checked_in"
+    admin.post("/api/events/add", json={"name": "Visitor Party", "date": "2026-11-01"})
+
+    r = anyone.get(url, headers={"Authorization": "Bearer cron-test-secret"})
+    assert r.status_code == 200 and r.get_json() == {"status": "reset", "faceShotsDeleted": 10}
+    state = admin.get("/api/state").get_json()
+    assert {m["name"] for m in state["members"]} == {"Alex Rivera", "Sam Chen", "Jordan Lee", "Taylor Kim"}
+    assert all(m["samples"] == 0 and not m["consent"] for m in state["members"])
+    assert {e["id"] for e in state["events"]} == {"intro-ai", "intro-github"}
+    assert state["attendance"] == [] and state["recent"] == []
+    assert state["settings"] == {"eventId": "intro-ai", "threshold": 0.3, "requireLiveness": False, "running": False}
+    assert member(admin, "Taylor Kim")["eventsAttended"] == 7
