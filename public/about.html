@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>About — Bladeless</title>
+<style>
+  :root {
+    --bg: #12091f;
+    --surface: #1c1230;
+    --line: #35244f;
+    --text: #efe9fa;
+    --muted: #b3a6cc;
+    --accent: #a77bff;
+    --accent-ink: #12091f;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 17px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center;
+    justify-content: space-between;
+    padding: 18px clamp(20px, 5vw, 56px);
+    border-bottom: 1px solid var(--line);
+  }
+  header .brand { font-weight: 700; color: var(--text); text-decoration: none; font-size: 1.1rem; }
+  header nav { display: flex; gap: 20px; flex-wrap: wrap; }
+  header nav a { color: var(--muted); text-decoration: none; }
+  header nav a:hover, header nav a[aria-current] { color: var(--text); }
+  main { max-width: 760px; margin: 0 auto; padding: 56px 20px 80px; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); line-height: 1.1; margin: 0 0 12px; letter-spacing: -0.02em; }
+  .tagline { color: var(--muted); font-size: 1.25rem; margin: 0 0 40px; }
+  h2 { font-size: 1.35rem; margin: 44px 0 10px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  .goal {
+    background: var(--surface);
+    border-left: 4px solid var(--accent);
+    padding: 20px 24px;
+    border-radius: 0 10px 10px 0;
+    font-size: 1.15rem;
+    margin: 0 0 8px;
+  }
+  ul { padding-left: 1.2em; margin: 0 0 14px; max-width: 68ch; }
+  li { margin-bottom: 6px; }
+  .team { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; list-style: none; }
+  .team li {
+    background: var(--surface); border: 1px solid var(--line);
+    padding: 8px 16px; border-radius: 999px; margin: 0;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .btn {
+    display: inline-block; padding: 12px 22px; border-radius: 8px;
+    background: var(--accent); color: var(--accent-ink);
+    font-weight: 600; text-decoration: none;
+  }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+  footer { border-top: 1px solid var(--line); color: var(--muted); padding: 24px clamp(20px, 5vw, 56px); font-size: 0.9rem; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">Bladeless</a>
+  <nav aria-label="Main">
+    <a href="/">Home</a>
+    <a href="/checkin.html">Check-in</a>
+    <a href="/about.html" aria-current="page">About</a>
+    <a href="https://github.com/jace-walker/Bladeless">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <h1>Blade, minus the line.</h1>
+  <p class="tagline">A face check-in for club events, built as an extension of Blade.</p>
+
+  <h2>Our goal</h2>
+  <p class="goal">Make checking in to Knight Hacks and Kickstart events take a second, with no QR code to find and no Discord login at the door.</p>
+  <p>Long lines at the start of an event are a small problem, but we run into it every time. Bladeless lets a member look at a camera, see “Hello, Name!”, and walk in. QR and manual check-in stay available as a backup, so nobody is ever stuck.</p>
+
+  <h2>Why we built it</h2>
+  <p>Opening Blade to pull up a QR code is easy to forget until you’re standing at the door, and then you’re signing in with Discord while the line grows. It isn’t the flashiest project, but it fixes something we all deal with.</p>
+
+  <h2>How it works</h2>
+  <ul>
+    <li><strong>Opt in once.</strong> A member agrees to a clear consent screen and takes five pictures with their webcam.</li>
+    <li><strong>Look at the camera.</strong> A laptop at the door recognizes enrolled members and checks in several people at a time.</li>
+    <li><strong>Organizers stay in control.</strong> An admin page manages members, dues, consent, events, and attendance.</li>
+  </ul>
+
+  <h2>Privacy comes first</h2>
+  <ul>
+    <li>Enrollment is strictly opt-in, and consent is required before any capture.</li>
+    <li>We store number embeddings that describe a face, never photos.</li>
+    <li>Members can withdraw consent or delete their face data at any time.</li>
+    <li>Dues status is shown only to organizers, never on the public screen.</li>
+  </ul>
+
+  <h2>What it’s built with</h2>
+  <p>DeepFace with the Facenet512 model turns each face into a 512-number embedding. A Flask API on Vercel talks to Neon Postgres, where pgvector finds the closest match using cosine distance. The pages are plain HTML, CSS, and JavaScript styled to match Blade.</p>
+
+  <h2>What’s next</h2>
+  <p>Before this goes anywhere near a real club event, we want Knight Hacks leadership to review the privacy approach, add automatic deletion of face data after each event, and strengthen the check against someone holding up a photo.</p>
+
+  <h2>The team</h2>
+  <p>Team JJSA, built at Knight Hacks IX. This was the first hackathon and the first team project for all of us.</p>
+  <ul class="team">
+    <li>Jack Hackett</li>
+    <li>Aaron</li>
+    <li>Stuart Palmer</li>
+    <li>Jace Walker</li>
+  </ul>
+
+  <div class="actions">
+    <a class="btn" href="/checkin.html#enroll">Add my face</a>
+    <a class="btn ghost" href="https://devpost.com/software/bladeless">See it on Devpost</a>
+    <a class="btn ghost" href="https://github.com/jace-walker/Bladeless">View the code</a>
+  </div>
+</main>
+
+<footer>A student demo, independent of the real Blade portal. Camera pictures are never saved.</footer>
+</body>
+</html>
